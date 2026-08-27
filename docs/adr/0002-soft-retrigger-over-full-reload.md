@@ -1,0 +1,3 @@
+# Prefer Soft Re-triggering Over Full Page Reload During Drop Sniping
+
+Full browser reloads during competitive midnight reservation drops incur a 500-1500ms latency penalty due to script parsing, asset re-evaluation, and React reconciliation. We decided to implement a hybrid refresh mechanism: soft re-triggering (simulating date clicks and capacity queries) when the target date element already exists in the DOM, and only performing a hard reload (at T-200ms) if the future calendar date has not yet been rendered by the server. This minimizes latency and maximizes time-to-first-click when slots become active.
