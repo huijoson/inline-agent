@@ -34,6 +34,7 @@ function createFakeReservationAdapter(options = {}) {
     availableSlots: [...(options.availableSlots || [])],
     claimedSlot: null,
     requiresDeposit: options.requiresDeposit ?? false,
+    isContactFormPage: options.isContactFormPage ?? false,
     submittedReservation: null,
     submissionDelayMs: options.submissionDelayMs || 0,
     callLog: [],
@@ -89,6 +90,18 @@ function createFakeReservationAdapter(options = {}) {
         }
       }
       return null;
+    },
+
+    // 4.1 Advance to Contact Form
+    clickSlotContinueButton() {
+      state.callLog.push({ method: 'clickSlotContinueButton', timestamp: Date.now() });
+      return true;
+    },
+
+    // 4.2 Check Contact Form Page
+    isContactFormPage() {
+      state.callLog.push({ method: 'isContactFormPage', timestamp: Date.now() });
+      return !!state.isContactFormPage;
     },
 
     // 5. Submit Reservation

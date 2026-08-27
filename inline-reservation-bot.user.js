@@ -884,199 +884,278 @@
     return InlineDomAdapter.findSubmitButton();
   }
 
-  function fillReservationForm() {
-    InlineDomAdapter.submitReservation({
-      name: config.userName,
-      gender: config.userGender,
-      phone: config.userPhone,
-      email: config.userEmail,
-      note: config.bookingNote,
-    }, {
-      autoSubmit: config.autoSubmitFree,
-    }).then((res) => {
-      if (res.status === 'CONFIRMED') {
-        playSuccessSound();
-        showNotification('Inline 訂位完成', '已自動為您點擊送出完成預約！請檢查信箱或簡訊確認信。');
-        stopSniper();
-      } else if (res.status === 'DEPOSIT_REQUIRED') {
-        playSuccessSound();
-        showNotification('Inline 搶位提醒', '已成功鎖定時段！請立即於視窗確認並完成信用卡預授權。');
-        stopSniper();
-      } else if (res.status === 'SUBMIT_TIMEOUT' || res.status === 'HELD_FOR_MANUAL_SUBMISSION') {
-        playSuccessSound();
-        showNotification('Inline 搶位成功', '時段已鎖定！請點擊頁面送出完成預約。');
-        stopSniper();
-      }
+  // ==========================================
+  // 6. 搶位排程引擎模組 (SnipingEngine)
+  // 依據 ADR-0003 透過 ReservationTarget 縫隙驅動開搶與撿漏，絕不直接碰觸 DOM
+  // ==========================================
+  const SnipingState = {
+    IDLE: 'IDLE',
+    COUNTDOWN: 'COUNTDOWN',
+    ACTIVE_SNIPING: 'ACTIVE_SNIPING',
+    AWAITING_FORM: 'AWAITING_FORM',
+    COMPLETED: 'COMPLETED',
+    HALTED_DEPOSIT: 'HALTED_DEPOSIT',
+  };
+
+  function createSnipingEngine(deps = {}) {
+    const adapter = deps.adapter || InlineDomAdapter;
+    const configProvider = deps.getConfig || (() => config);
+    const timeProvider = deps.getNow || getSyncedNow;
+    const logger = deps.logger || addLog;
+    const onStatusUpdate = deps.onStatusUpdate || updateStatusUI;
+    const onNotify = deps.onNotify || ((title, body) => {
+      playSuccessSound();
+      showNotification(title, body);
     });
-  }
 
-  // 轉移並等待進入聯絡人表單流程 (無縫串接：選時段 ➔ 點「完成預訂」 ➔ 自動解須知 ➔ 自動填表 ➔ 自動點「確認訂位」)
-  function proceedToContactForm() {
-    addLog('⏳ 時段已鎖定！正在點擊完成預訂並推進流程...');
+    let currentStatus = SnipingState.IDLE;
+    let timerId = null;
+    let pollTimeoutId = null;
+    let dropIntervalId = null;
+    let formWaitIntervalId = null;
 
-    // 立即嘗試點擊一次「完成預訂」
-    clickSlotContinueButton();
+    function setStatus(newStatus, displayTxt, timeStr, running = true) {
+      currentStatus = newStatus;
+      if (onStatusUpdate) {
+        onStatusUpdate(displayTxt, timeStr, running);
+      }
+    }
 
-    let formAttempts = 0;
-    const formWaitInterval = setInterval(() => {
-      formAttempts++;
+    function clearAllTimers() {
+      if (timerId) clearInterval(timerId);
+      if (pollTimeoutId) clearTimeout(pollTimeoutId);
+      if (dropIntervalId) clearInterval(dropIntervalId);
+      if (formWaitIntervalId) clearInterval(formWaitIntervalId);
+      timerId = null;
+      pollTimeoutId = null;
+      dropIntervalId = null;
+      formWaitIntervalId = null;
+    }
 
-      // 1. 若時段頁面的「完成預訂 / 下一步」按鈕尚未按成功，持續秒按
-      clickSlotContinueButton();
+    function stop() {
+      clearAllTimers();
+      currentStatus = SnipingState.IDLE;
+      state.isRunning = false;
+      setStatus(SnipingState.IDLE, '🔴 待命', '--:--:--', false);
+      logger('⏹️ 搶位程序已停止');
+    }
 
-      // 2. 若有規則須知彈窗，持續秒按同意
-      handleHouseRules();
+    function submitCurrentReservation() {
+      const cfg = configProvider();
+      adapter.submitReservation({
+        name: cfg.userName,
+        gender: cfg.userGender,
+        phone: cfg.userPhone,
+        email: cfg.userEmail,
+        note: cfg.bookingNote,
+      }, {
+        autoSubmit: cfg.autoSubmitFree,
+      }).then((res) => {
+        if (res.status === 'CONFIRMED') {
+          setStatus(SnipingState.COMPLETED, '🟢 預約完成', '00:00:00', false);
+          onNotify('Inline 訂位完成', '已自動為您點擊送出完成預約！請檢查信箱或簡訊確認信。');
+          stop();
+        } else if (res.status === 'DEPOSIT_REQUIRED') {
+          setStatus(SnipingState.HALTED_DEPOSIT, '💳 需保證金', '--:--:--', false);
+          onNotify('Inline 搶位提醒', '已成功鎖定時段！請立即於視窗確認並完成信用卡預授權。');
+          stop();
+        } else if (res.status === 'SUBMIT_TIMEOUT' || res.status === 'HELD_FOR_MANUAL_SUBMISSION') {
+          setStatus(SnipingState.COMPLETED, '🔔 時段已鎖定', '--:--:--', false);
+          onNotify('Inline 搶位成功', '時段已鎖定！請點擊頁面送出完成預約。');
+          stop();
+        }
+      }).catch((err) => {
+        logger(`❌ 送出預約時發生異常: ${err?.message || err}`);
+      });
+    }
 
-      // 3. 檢查聯絡資訊表單是否已經渲染出現在 DOM 中
-      const nameInput = document.querySelector('input#name, input[data-cy="name"], form#contact-form');
-      if (nameInput) {
-        clearInterval(formWaitInterval);
-        addLog('📋 已順利進入聯絡資訊頁面，開始全自動填表與確認訂位！');
-        fillReservationForm();
+    function proceedToContactForm() {
+      setStatus(SnipingState.AWAITING_FORM, '🟡 前往表單中', '--:--:--', true);
+      logger('⏳ 時段已鎖定！正在推進流程進入聯絡人表單...');
+
+      adapter.clickSlotContinueButton();
+
+      let formAttempts = 0;
+      formWaitIntervalId = setInterval(() => {
+        formAttempts++;
+        adapter.clickSlotContinueButton();
+        adapter.acknowledgeHouseRules();
+
+        if (adapter.isContactFormPage()) {
+          clearInterval(formWaitIntervalId);
+          formWaitIntervalId = null;
+          logger('📋 已順利進入聯絡資訊頁面，開始填表與預約流程！');
+          submitCurrentReservation();
+          return;
+        }
+
+        if (formAttempts >= 180) {
+          clearInterval(formWaitIntervalId);
+          formWaitIntervalId = null;
+          logger('⚠️ 等待聯絡資訊表單超時，請檢查畫面是否需手動確認');
+        }
+      }, 100);
+    }
+
+    function executeCancellationCycle() {
+      adapter.acknowledgeHouseRules();
+      const cfg = configProvider();
+      adapter.setPartySize(cfg.adults, cfg.kids);
+
+      if (adapter.isContactFormPage()) {
+        submitCurrentReservation();
         return;
       }
 
-      // 20 秒保護超時
-      if (formAttempts >= 180) {
-        clearInterval(formWaitInterval);
-        addLog('⚠️ 等待聯絡資訊表單超時，請檢查畫面是否需要手動點擊');
-      }
-    }, 100);
-  }
+      adapter.selectDate(cfg.targetDate);
+      const priorityList = (cfg.prioritySlots || '').split(',').map((s) => s.trim()).filter(Boolean);
+      const picked = adapter.claimSlot(priorityList);
 
-  // 單次執行循環
-  function executeSnipeCycle() {
-    handleHouseRules();
-    setPartySize();
-
-    // 檢查是否已在聯絡人表單頁面
-    const contactForm = document.getElementById('contact-form') || document.querySelector('form');
-    const isContactFormPage = contactForm && document.querySelector('input#name, input#phone');
-    if (isContactFormPage) {
-      fillReservationForm();
-      return;
-    }
-
-    // 選取日期
-    selectTargetDate();
-
-    // 嘗試選取時段
-    const picked = attemptPickSlot();
-    if (picked) {
-      // 成功選到時段，平滑串接至表單處理
-      proceedToContactForm();
-    } else {
-      // 尚未有可選時段
-      if (config.mode === 'cancellation') {
+      if (picked) {
+        proceedToContactForm();
+      } else {
         scheduleNextPoll();
       }
     }
-  }
 
-  // 輪詢撿漏調度 (Cancellation Sniping)
-  function scheduleNextPoll() {
-    if (!state.isRunning) return;
-    const interval = Math.floor(
-      Math.random() * (config.pollIntervalMax - config.pollIntervalMin + 1) + config.pollIntervalMin
-    );
-    addLog(`⏳ 目前無空位，將於 ${(interval / 1000).toFixed(1)} 秒後自動刷新查詢...`);
-    state.pollTimeoutId = setTimeout(() => {
-      // 軟刷新：重新點擊目標日期或重觸發查詢
-      const refreshed = selectTargetDate();
-      if (!refreshed) {
-        // 不進行全頁 reload，改為重新觸發狀態以帶動日曆重新查詢，避免觸發防火牆
-        setPartySize();
-      }
-      setTimeout(executeSnipeCycle, 400);
-    }, interval);
-  }
-
-  // 準時放位倒數調度 (Opening Drop Sniping)
-  function scheduleDropSnipe() {
-    if (!state.isRunning) return;
-
-    const now = getSyncedNow();
-    const [targetHour, targetMinute, targetSecond] = config.dropTime.split(':').map(Number);
-    const dropDate = new Date(now);
-    dropDate.setHours(targetHour, targetMinute, targetSecond || 0, 0);
-
-    // 若今天時間已過目標時間，設為次日
-    if (dropDate.getTime() <= now) {
-      dropDate.setDate(dropDate.getDate() + 1);
-    }
-
-    const diffMs = dropDate.getTime() - now;
-    const targetTriggerMs = diffMs - config.leadTimeMs;
-
-    addLog(`⏰ 目標開搶時間: ${dropDate.toLocaleTimeString()} (距離 ${Math.round(diffMs / 1000)} 秒)`);
-
-    // 啟動 UI 倒數計時器
-    if (state.timerId) clearInterval(state.timerId);
-    state.timerId = setInterval(() => {
-      const remainingMs = dropDate.getTime() - getSyncedNow();
-      if (remainingMs <= 0) {
-        clearInterval(state.timerId);
-        updateStatusUI('🟢 開搶觸發中！', '00:00:00', true);
-        triggerDropAction();
-      } else {
-        const sec = Math.floor(remainingMs / 1000) % 60;
-        const min = Math.floor(remainingMs / (1000 * 60)) % 60;
-        const hr = Math.floor(remainingMs / (1000 * 60 * 60));
-        const formatted = `${String(hr).padStart(2, '0')}:${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}.${Math.floor((remainingMs % 1000) / 100)}`;
-        updateStatusUI('🟡 等待開搶中', formatted, true);
-      }
-    }, 80);
-  }
-
-  function triggerDropAction() {
-    addLog('⚡ 開搶時間到達！執行毫秒級搶位程序！');
-
-    // 進行高頻重試時段抓取（絕不執行整頁 location.reload，避免觸發 PerimeterX 防火牆）
-    let attempts = 0;
-    const dropInterval = setInterval(() => {
-      attempts++;
-      handleHouseRules();
-      setPartySize();
-      selectTargetDate();
-      const picked = attemptPickSlot();
-      if (picked || attempts >= 30) {
-        clearInterval(dropInterval);
-        if (picked) {
-          proceedToContactForm();
-        } else {
-          addLog('❌ 搶位結束：指定時段未能成功取得');
-          stopSniper();
+    function scheduleNextPoll() {
+      if (currentStatus === SnipingState.IDLE && !state.isRunning) return;
+      const cfg = configProvider();
+      const interval = Math.floor(
+        Math.random() * (cfg.pollIntervalMax - cfg.pollIntervalMin + 1) + cfg.pollIntervalMin
+      );
+      logger(`⏳ 目前無空位，將於 ${(interval / 1000).toFixed(1)} 秒後自動軟刷新查詢...`);
+      pollTimeoutId = setTimeout(() => {
+        // 軟重觸發 (ADR-0002)：不執行 location.reload()
+        const refreshed = adapter.selectDate(cfg.targetDate);
+        if (!refreshed) {
+          adapter.setPartySize(cfg.adults, cfg.kids);
         }
+        setTimeout(executeCancellationCycle, 400);
+      }, interval);
+    }
+
+    function scheduleDropSnipe() {
+      const cfg = configProvider();
+      const now = timeProvider();
+      const [targetHour, targetMinute, targetSecond] = (cfg.dropTime || '00:00:00').split(':').map(Number);
+      const dropDate = new Date(now);
+      dropDate.setHours(targetHour, targetMinute, targetSecond || 0, 0);
+
+      if (dropDate.getTime() <= now) {
+        dropDate.setDate(dropDate.getDate() + 1);
       }
-    }, 120);
+
+      const diffMs = dropDate.getTime() - now;
+      logger(`⏰ 目標開搶時間: ${dropDate.toLocaleTimeString()} (距離 ${Math.round(diffMs / 1000)} 秒)`);
+      setStatus(SnipingState.COUNTDOWN, '🟡 等待開搶中', '--:--:--', true);
+
+      if (timerId) clearInterval(timerId);
+      timerId = setInterval(() => {
+        const remainingMs = dropDate.getTime() - timeProvider();
+        if (remainingMs <= 0) {
+          clearInterval(timerId);
+          timerId = null;
+          setStatus(SnipingState.ACTIVE_SNIPING, '🟢 開搶觸發中！', '00:00:00', true);
+          triggerDropAction();
+        } else {
+          const sec = Math.floor(remainingMs / 1000) % 60;
+          const min = Math.floor(remainingMs / (1000 * 60)) % 60;
+          const hr = Math.floor(remainingMs / (1000 * 60 * 60));
+          const formatted = `${String(hr).padStart(2, '0')}:${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}.${Math.floor((remainingMs % 1000) / 100)}`;
+          setStatus(SnipingState.COUNTDOWN, '🟡 等待開搶中', formatted, true);
+        }
+      }, 80);
+    }
+
+    function triggerDropAction() {
+      logger('⚡ 開搶時間到達！執行毫秒級搶位程序！');
+      const cfg = configProvider();
+      const priorityList = (cfg.prioritySlots || '').split(',').map((s) => s.trim()).filter(Boolean);
+
+      let attempts = 0;
+      dropIntervalId = setInterval(() => {
+        attempts++;
+        adapter.acknowledgeHouseRules();
+        adapter.setPartySize(cfg.adults, cfg.kids);
+        adapter.selectDate(cfg.targetDate);
+        const picked = adapter.claimSlot(priorityList);
+
+        if (picked || attempts >= 30) {
+          clearInterval(dropIntervalId);
+          dropIntervalId = null;
+          if (picked) {
+            proceedToContactForm();
+          } else {
+            logger('❌ 搶位結束：指定時段未能成功取得');
+            stop();
+          }
+        }
+      }, 120);
+    }
+
+    function start() {
+      clearAllTimers();
+      state.isRunning = true;
+      const cfg = configProvider();
+      setStatus(SnipingState.ACTIVE_SNIPING, '🟢 運行中', '--:--:--', true);
+      logger(`🚀 搶位程序啟動 [模式: ${cfg.mode === 'drop' ? '準時放位' : '撿漏輪詢'}]`);
+
+      if (adapter.isContactFormPage()) {
+        logger('📋 偵測到已在聯絡資訊頁面，立即執行自動填表與送出！');
+        submitCurrentReservation();
+        return;
+      }
+
+      if (cfg.mode === 'drop') {
+        scheduleDropSnipe();
+      } else {
+        executeCancellationCycle();
+      }
+    }
+
+    return {
+      start,
+      stop,
+      getStatus: () => currentStatus,
+      triggerDropAction,
+      executeCancellationCycle,
+      proceedToContactForm,
+      scheduleNextPoll,
+      scheduleDropSnipe,
+      submitCurrentReservation,
+    };
   }
 
+  const SnipingEngine = createSnipingEngine();
+
+  // 頂層調度相容代理 (Top-Level Controller Delegates)
   function startSniper() {
-    state.isRunning = true;
-    updateStatusUI('🟢 運行中', '--:--:--', true);
-    addLog(`🚀 搶位程序啟動 [模式: ${config.mode === 'drop' ? '準時放位' : '撿漏輪詢'}]`);
-
-    // 若使用者目前已經在聯絡資訊表單頁，直接填寫並送出！
-    const onContactForm = document.getElementById('contact-form') || document.querySelector('input#name');
-    if (onContactForm) {
-      addLog('📋 偵測到已在聯絡資訊頁面，立即執行自動填表與送出！');
-      fillReservationForm();
-      return;
-    }
-
-    if (config.mode === 'drop') {
-      scheduleDropSnipe();
-    } else {
-      executeSnipeCycle();
-    }
+    SnipingEngine.start();
   }
 
   function stopSniper() {
-    state.isRunning = false;
-    if (state.timerId) clearInterval(state.timerId);
-    if (state.pollTimeoutId) clearTimeout(state.pollTimeoutId);
-    updateStatusUI('🔴 待命', '--:--:--', false);
-    addLog('⏹️ 搶位程序已停止');
+    SnipingEngine.stop();
+  }
+
+  function executeSnipeCycle() {
+    SnipingEngine.executeCancellationCycle();
+  }
+
+  function scheduleNextPoll() {
+    SnipingEngine.scheduleNextPoll();
+  }
+
+  function scheduleDropSnipe() {
+    SnipingEngine.scheduleDropSnipe();
+  }
+
+  function triggerDropAction() {
+    SnipingEngine.triggerDropAction();
+  }
+
+  function proceedToContactForm() {
+    SnipingEngine.proceedToContactForm();
   }
 
   // ==========================================
@@ -1126,6 +1205,9 @@
     module.exports = {
       createInlineDomAdapter,
       InlineDomAdapter,
+      createSnipingEngine,
+      SnipingEngine,
+      SnipingState,
     };
   }
 })();
