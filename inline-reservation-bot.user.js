@@ -51,6 +51,7 @@
   // 讀取/儲存設定
   function loadConfig() {
     try {
+      if (typeof localStorage === 'undefined') return { ...DEFAULT_CONFIG };
       const saved = localStorage.getItem(STORAGE_KEY);
       return saved ? { ...DEFAULT_CONFIG, ...JSON.parse(saved) } : { ...DEFAULT_CONFIG };
     } catch (e) {
@@ -545,278 +546,368 @@
   }
 
   // ==========================================
-  // 5. 核心自動化邏輯 (Core Automation)
+  // 5. 預訂目標轉接器模組 (InlineDomAdapter)
+  // 依據 ADR-0003 實作 ReservationTarget 縫隙，深層封裝所有 DOM 查詢與 React 原型鏈描述符覆寫
   // ==========================================
+  function createInlineDomAdapter(deps = {}) {
+    const doc = deps.document || (typeof document !== 'undefined' ? document : null);
+    const log = deps.logger || (typeof addLog === 'function' ? addLog : console.log);
 
-  // 自動同意用餐須知與注意事項 (House Rules Modal & Terms Checkboxes)
-  function handleHouseRules() {
-    let handled = false;
+    function isElementClickable(el) {
+      if (!el || el.disabled || (el.classList && el.classList.contains('disabled'))) return false;
+      if (el.getAttribute && el.getAttribute('aria-disabled') === 'true') return false;
+      return el.offsetParent !== null;
+    }
 
-    // 1. 自動勾選「我已閱讀並同意規則與注意事項」等核取方塊
-    const allCheckboxes = Array.from(
-      document.querySelectorAll('input[type="checkbox"], [role="checkbox"]')
-    );
-    allCheckboxes.forEach((cb) => {
-      const parentText = (cb.closest('label, div, p, li')?.innerText || '').trim();
-      const isRuleCheckbox = /我已閱讀|同意規則|注意事項|同意並閱讀|服務條款|我同意/i.test(parentText);
-      if (isRuleCheckbox) {
-        if (cb.type === 'checkbox' && !cb.checked && !cb.disabled) {
-          cb.click();
-          handled = true;
-          addLog('📋 自動勾選：我已閱讀並同意規則與注意事項');
-        } else if (cb.getAttribute('aria-checked') === 'false') {
-          cb.click();
-          handled = true;
-          addLog('📋 自動勾選條款核取方塊');
+    function setReactValue(element, val) {
+      if (!element || val === undefined || val === null || val === '') return;
+      try {
+        const prototype = Object.getPrototypeOf(element);
+        const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+        if (descriptor && descriptor.set) {
+          descriptor.set.call(element, val);
+        } else {
+          element.value = val;
         }
+        if (typeof Event === 'function') {
+          element.dispatchEvent(new Event('input', { bubbles: true }));
+          element.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      } catch (e) {
+        element.value = val;
       }
-    });
-
-    // 2. 點選「我已閱讀並同意」、「同意並繼續」、「我知道了」、「確定」等按鈕或文字按鈕
-    const candidateButtons = Array.from(
-      document.querySelectorAll('button, a, div[role="button"], input[type="button"], span[role="button"]')
-    );
-    const confirmBtn = candidateButtons.find((btn) => {
-      if (btn.disabled || btn.classList.contains('disabled') || btn.getAttribute('aria-disabled') === 'true') return false;
-      const txt = (btn.innerText || btn.value || '').trim();
-      return (
-        /我已閱讀並同意|我同意|我知道了|同意並繼續|繼續訂位|同意|我知道|確定|繼續|OK|Agree/i.test(txt) &&
-        !/取消|不同意|Close/i.test(txt)
-      );
-    });
-
-    if (confirmBtn && confirmBtn.offsetParent !== null) {
-      confirmBtn.click();
-      addLog(`📋 自動點擊確認須知：${confirmBtn.innerText.trim()}`);
-      return true;
     }
 
-    return handled;
+    return {
+      acknowledgeHouseRules() {
+        if (!doc) return false;
+        let handled = false;
+        try {
+          const allCheckboxes = Array.from(
+            doc.querySelectorAll('input[type="checkbox"], [role="checkbox"]')
+          );
+          allCheckboxes.forEach((cb) => {
+            const parentText = (cb.closest('label, div, p, li')?.innerText || '').trim();
+            const isRuleCheckbox = /我已閱讀|同意規則|注意事項|同意並閱讀|服務條款|我同意/i.test(parentText);
+            if (isRuleCheckbox) {
+              if (cb.type === 'checkbox' && !cb.checked && !cb.disabled) {
+                cb.click();
+                handled = true;
+                log('📋 自動勾選：我已閱讀並同意規則與注意事項');
+              } else if (cb.getAttribute && (cb.getAttribute('aria-checked') === 'false' || cb.getAttribute('data-state') === 'unchecked')) {
+                cb.click();
+                handled = true;
+                log('📋 自動勾選條款核取方塊');
+              }
+            }
+          });
+
+          const candidateButtons = Array.from(
+            doc.querySelectorAll('button, a, div[role="button"], input[type="button"], span[role="button"]')
+          );
+          const confirmBtn = candidateButtons.find((btn) => {
+            if (!isElementClickable(btn)) return false;
+            const txt = (btn.innerText || btn.value || '').trim();
+            return (
+              /我已閱讀並同意|我同意|我知道了|同意並繼續|繼續訂位|同意|我知道|確定|繼續|OK|Agree/i.test(txt) &&
+              !/取消|不同意|Close/i.test(txt)
+            );
+          });
+
+          if (confirmBtn) {
+            confirmBtn.click();
+            log(`📋 自動點擊確認須知：${confirmBtn.innerText.trim()}`);
+            return true;
+          }
+        } catch (e) {
+          console.warn('[InlineSniper] acknowledgeHouseRules 異常', e);
+        }
+        return handled;
+      },
+
+      setPartySize(adults, kids) {
+        if (!doc) return;
+        try {
+          const adultsStr = String(adults);
+          const kidsStr = String(kids);
+          const adultPicker = doc.getElementById('adult-picker') || doc.querySelector('select[name="adult"]');
+          if (adultPicker && adultPicker.value !== adultsStr) {
+            adultPicker.value = adultsStr;
+            if (typeof Event === 'function') {
+              adultPicker.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            log(`👥 設定大人人數: ${adultsStr}`);
+          }
+
+          const kidPicker = doc.getElementById('kid-picker') || doc.querySelector('select[name="kid"]');
+          if (kidPicker && kidPicker.value !== kidsStr) {
+            kidPicker.value = kidsStr;
+            if (typeof Event === 'function') {
+              kidPicker.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            log(`👶 設定小孩人數: ${kidsStr}`);
+          }
+        } catch (e) {
+          console.warn('[InlineSniper] setPartySize 異常', e);
+        }
+      },
+
+      selectDate(targetDate) {
+        if (!doc || !targetDate) return true;
+        try {
+          const targetDateFormatted = targetDate.replace(/-/g, '');
+          const dayElements = Array.from(doc.querySelectorAll('[data-date], button, div[role="button"]'));
+          const matchDateEl = dayElements.find((el) => {
+            const dataDate = (el.getAttribute && el.getAttribute('data-date')) || '';
+            return dataDate === targetDate || dataDate.replace(/-/g, '') === targetDateFormatted;
+          });
+
+          if (matchDateEl && isElementClickable(matchDateEl)) {
+            matchDateEl.click();
+            log(`📅 點擊目標日期: ${targetDate}`);
+            return true;
+          }
+        } catch (e) {
+          console.warn('[InlineSniper] selectDate 異常', e);
+        }
+        return false;
+      },
+
+      claimSlot(priorityList) {
+        if (!doc || !priorityList) return null;
+        try {
+          const slotButtons = Array.from(doc.querySelectorAll('button.time-slot, button[data-time], button'));
+          const availableSlots = slotButtons.filter((btn) => {
+            const txt = (btn.innerText || '').trim();
+            const isTimeFormat = /\b\d{1,2}:\d{2}\b/.test(txt);
+            if (!isTimeFormat) return false;
+            const isFull = (btn.classList && (btn.classList.contains('full') || btn.classList.contains('disabled'))) ||
+              btn.disabled || txt.includes('滿') || txt.includes('full');
+            return !isFull && isElementClickable(btn);
+          });
+
+          if (availableSlots.length === 0) return null;
+
+          for (const pref of priorityList) {
+            const trimmed = pref.trim();
+            if (!trimmed) continue;
+            const match = availableSlots.find((btn) => (btn.innerText || '').includes(trimmed));
+            if (match) {
+              match.click();
+              log(`🎯 成功鎖定時段: ${trimmed}！`);
+              this.clickSlotContinueButton();
+              return trimmed;
+            }
+          }
+        } catch (e) {
+          console.warn('[InlineSniper] claimSlot 異常', e);
+        }
+        return null;
+      },
+
+      clickSlotContinueButton() {
+        if (!doc) return false;
+        try {
+          const candidateButtons = Array.from(
+            doc.querySelectorAll('button, a, div[role="button"], input[type="button"]')
+          );
+          const nextBtn = candidateButtons.find((btn) => {
+            if (!isElementClickable(btn)) return false;
+            const txt = (btn.innerText || btn.value || '').trim();
+            return /完成預訂|下一步|繼續|確認時段|立即預訂|Next|Continue/i.test(txt);
+          });
+          if (nextBtn) {
+            nextBtn.click();
+            log(`👉 已自動點擊時段確認按鈕：【${nextBtn.innerText.trim()}】`);
+            return true;
+          }
+        } catch (e) {
+          console.warn('[InlineSniper] clickSlotContinueButton 異常', e);
+        }
+        return false;
+      },
+
+      isContactFormPage() {
+        if (!doc) return false;
+        return !!(doc.getElementById('contact-form') || doc.querySelector('input#name, input#phone'));
+      },
+
+      hasCreditCardDeposit() {
+        if (!doc) return false;
+        return !!doc.querySelector('iframe[src*="card"], iframe[src*="tappay"], #cardholder-name');
+      },
+
+      findSubmitButton() {
+        if (!doc) return null;
+        const directSubmit = doc.querySelector('button[data-cy="submit"], button[type="submit"].eERBSs');
+        if (directSubmit && isElementClickable(directSubmit)) return directSubmit;
+
+        const candidateButtons = Array.from(
+          doc.querySelectorAll('button, input[type="submit"], div[role="button"], a[role="button"]')
+        );
+        return candidateButtons.find((btn) => {
+          if (!isElementClickable(btn)) return false;
+          const txt = (btn.innerText || btn.value || '').trim();
+          return /確認訂位|完成預訂|確認預約|立即預訂|送出預訂|確認送出|確認|下一步|Confirm|Reserve|Complete/i.test(txt);
+        });
+      },
+
+      fillGuestDetails(guest) {
+        if (!doc || !guest) return;
+        // 姓名
+        const nameInput = doc.querySelector('input#name, input[data-cy="name"], input[name="name"]');
+        if (nameInput && guest.name && nameInput.value !== guest.name) {
+          setReactValue(nameInput, guest.name);
+        }
+        // 性別稱謂
+        if (guest.gender === 'male') {
+          const maleRadio = doc.querySelector('#gender-male, button#gender-male, input#gender-male');
+          if (maleRadio && ((maleRadio.getAttribute && maleRadio.getAttribute('aria-checked') === 'false') || (maleRadio.type === 'radio' && !maleRadio.checked))) {
+            maleRadio.click();
+          }
+        } else if (guest.gender === 'female') {
+          const femaleRadio = doc.querySelector('#gender-female, button#gender-female, input#gender-female');
+          if (femaleRadio && ((femaleRadio.getAttribute && femaleRadio.getAttribute('aria-checked') === 'false') || (femaleRadio.type === 'radio' && !femaleRadio.checked))) {
+            femaleRadio.click();
+          }
+        }
+        // 電話
+        const phoneInput = doc.querySelector('input#phone, input[data-cy="phone"], input[type="tel"], input[name="phone"]');
+        if (phoneInput && guest.phone && phoneInput.value !== guest.phone) {
+          setReactValue(phoneInput, guest.phone);
+        }
+        // Email
+        const emailInput = doc.querySelector('input#email, input[data-cy="email"], input[type="email"], input[name="email"]');
+        if (emailInput && guest.email && emailInput.value !== guest.email) {
+          setReactValue(emailInput, guest.email);
+        }
+        // 備註
+        const noteArea = doc.querySelector('textarea, input#note, input[name="note"]');
+        if (noteArea && guest.note && noteArea.value !== guest.note) {
+          setReactValue(noteArea, guest.note);
+        }
+        // 條款核取方塊
+        const allCheckboxes = Array.from(
+          doc.querySelectorAll('input[type="checkbox"], button[role="checkbox"], [role="checkbox"]')
+        );
+        allCheckboxes.forEach((cb) => {
+          if (cb.id === 'marketing-optin') return;
+          if (cb.type === 'checkbox') {
+            if (!cb.checked && !cb.disabled) cb.click();
+          } else if (cb.getAttribute && (cb.getAttribute('aria-checked') === 'false' || cb.getAttribute('data-state') === 'unchecked')) {
+            cb.click();
+          }
+        });
+        log('📝 已自動填妥聯絡人資料與條款勾選');
+      },
+
+      submitReservation(guestDetails, policy = { autoSubmit: true }) {
+        return new Promise((resolve) => {
+          this.fillGuestDetails(guestDetails);
+
+          if (this.hasCreditCardDeposit()) {
+            log('💳 偵測到需要信用卡保證金！依資安規範暫停自動送出，請手動確認填寫卡號！');
+            resolve({
+              success: false,
+              status: 'DEPOSIT_REQUIRED',
+              message: 'Credit card deposit required',
+            });
+            return;
+          }
+
+          if (!policy.autoSubmit) {
+            log('🔔 依預約政策暫停自動送出，請確認畫面資訊後手動點擊送出！');
+            resolve({
+              success: false,
+              status: 'HELD_FOR_MANUAL_SUBMISSION',
+              message: 'Held for manual submission',
+            });
+            return;
+          }
+
+          log('🚀 啟動全自動送出程序，正在等待確認預約按鈕...');
+          let attempts = 0;
+          const interval = setInterval(() => {
+            attempts++;
+            const submitBtn = this.findSubmitButton();
+            if (submitBtn) {
+              clearInterval(interval);
+              log(`🚀 成功自動點擊【${submitBtn.innerText.trim()}】！完成預約送出！`);
+              submitBtn.click();
+              resolve({
+                success: true,
+                status: 'CONFIRMED',
+                message: 'Reservation submitted successfully',
+              });
+            } else if (attempts >= 25) {
+              clearInterval(interval);
+              log('🔔 已填妥個資，但未偵測到送出按鈕，請手動確認送出！');
+              resolve({
+                success: false,
+                status: 'SUBMIT_TIMEOUT',
+                message: 'Submit button timed out',
+              });
+            }
+          }, 120);
+        });
+      },
+
+      _setReactValue: setReactValue,
+    };
   }
 
-  // 設定大人與小孩人數
+  const InlineDomAdapter = createInlineDomAdapter();
+
+  // 相容代理層 (Backward Compatibility Delegates)
+  function handleHouseRules() {
+    return InlineDomAdapter.acknowledgeHouseRules();
+  }
+
   function setPartySize() {
-    // 檢查 adult picker
-    const adultPicker = document.getElementById('adult-picker') || document.querySelector('select[name="adult"]');
-    if (adultPicker && adultPicker.value !== config.adults) {
-      adultPicker.value = config.adults;
-      adultPicker.dispatchEvent(new Event('change', { bubbles: true }));
-      addLog(`👥 設定大人人數: ${config.adults}`);
-    }
-
-    const kidPicker = document.getElementById('kid-picker') || document.querySelector('select[name="kid"]');
-    if (kidPicker && kidPicker.value !== config.kids) {
-      kidPicker.value = config.kids;
-      kidPicker.dispatchEvent(new Event('change', { bubbles: true }));
-      addLog(`👶 設定小孩人數: ${config.kids}`);
-    }
+    InlineDomAdapter.setPartySize(config.adults, config.kids);
   }
 
-  // 嘗試選取目標日期
   function selectTargetDate() {
-    if (!config.targetDate) return true;
-
-    // 日期元件可能以 data-date="YYYY-MM-DD" 或文字顯示
-    const targetDateFormatted = config.targetDate.replace(/-/g, ''); // 20260827
-    const dayElements = Array.from(document.querySelectorAll('[data-date], button, div[role="button"]'));
-
-    const matchDateEl = dayElements.find((el) => {
-      const dataDate = el.getAttribute('data-date') || '';
-      return dataDate === config.targetDate || dataDate.replace(/-/g, '') === targetDateFormatted;
-    });
-
-    if (matchDateEl && !matchDateEl.classList.contains('disabled') && !matchDateEl.hasAttribute('disabled')) {
-      matchDateEl.click();
-      addLog(`📅 點擊目標日期: ${config.targetDate}`);
-      return true;
-    }
-    return false;
+    return InlineDomAdapter.selectDate(config.targetDate);
   }
 
-  // 掃描並點選符合優先名單的時段 (Priority Slot Sniping)
   function attemptPickSlot() {
-    const priorityList = config.prioritySlots
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    // 取得所有時段按鈕
-    const slotButtons = Array.from(document.querySelectorAll('button.time-slot, button[data-time], button'));
-    const availableSlots = slotButtons.filter((btn) => {
-      const txt = (btn.innerText || '').trim();
-      const isTimeFormat = /\b\d{1,2}:\d{2}\b/.test(txt);
-      if (!isTimeFormat) return false;
-
-      const isFull = btn.classList.contains('full') || btn.classList.contains('disabled') || btn.disabled || txt.includes('滿') || txt.includes('full');
-      return !isFull && btn.offsetParent !== null;
-    });
-
-    if (availableSlots.length === 0) {
-      return null;
-    }
-
-    // 依優先名單進行比對
-    for (const pref of priorityList) {
-      const match = availableSlots.find((btn) => (btn.innerText || '').includes(pref));
-      if (match) {
-        match.click();
-        addLog(`🎯 成功鎖定第一志願時段: ${pref}！`);
-        return pref;
-      }
-    }
-
-    // 若優先時段皆無，但有其他時段可選（若使用者未強制要求嚴格匹配）
-    return null;
+    const priorityList = config.prioritySlots.split(',').map((s) => s.trim()).filter(Boolean);
+    return InlineDomAdapter.claimSlot(priorityList);
   }
 
-  function setReactInputValue(input, val) {
-    if (!input || val === undefined || val === null || val === '') return;
-    const prototype = Object.getPrototypeOf(input);
-    const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
-    if (descriptor && descriptor.set) {
-      descriptor.set.call(input, val);
-    } else {
-      input.value = val;
-    }
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-  }
-
-  function setReactTextareaValue(textarea, val) {
-    if (!textarea || val === undefined || val === null || val === '') return;
-    const prototype = Object.getPrototypeOf(textarea);
-    const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
-    if (descriptor && descriptor.set) {
-      descriptor.set.call(textarea, val);
-    } else {
-      textarea.value = val;
-    }
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    textarea.dispatchEvent(new Event('change', { bubbles: true }));
+  function clickSlotContinueButton() {
+    return InlineDomAdapter.clickSlotContinueButton();
   }
 
   function findSubmitButton() {
-    // 優先匹配 inline 專屬 data-cy="submit"
-    const directSubmit = document.querySelector('button[data-cy="submit"], button[type="submit"].eERBSs');
-    if (directSubmit && !directSubmit.disabled && directSubmit.offsetParent !== null) {
-      return directSubmit;
-    }
-
-    const candidateButtons = Array.from(
-      document.querySelectorAll('button, input[type="submit"], div[role="button"], a[role="button"]')
-    );
-    return candidateButtons.find((btn) => {
-      if (btn.disabled || btn.classList.contains('disabled') || btn.getAttribute('aria-disabled') === 'true') return false;
-      const txt = (btn.innerText || btn.value || '').trim();
-      return /確認訂位|完成預訂|確認預約|立即預訂|送出預訂|確認送出|確認|下一步|Confirm|Reserve|Complete/i.test(txt);
-    });
+    return InlineDomAdapter.findSubmitButton();
   }
 
-  // 表單自動填寫
   function fillReservationForm() {
-    // 姓名 (使用 React 原生 Setter 確保狀態更新)
-    const nameInput = document.querySelector('input#name, input[data-cy="name"], input[name="name"]');
-    if (nameInput && config.userName && nameInput.value !== config.userName) {
-      setReactInputValue(nameInput, config.userName);
-    }
-
-    // 性別稱謂 (inline 使用 Radix UI button[role="radio"])
-    if (config.userGender === 'male') {
-      const maleRadio = document.querySelector('#gender-male, button#gender-male, input#gender-male');
-      if (maleRadio && (maleRadio.getAttribute('aria-checked') === 'false' || (maleRadio.type === 'radio' && !maleRadio.checked))) {
-        maleRadio.click();
-      }
-    } else if (config.userGender === 'female') {
-      const femaleRadio = document.querySelector('#gender-female, button#gender-female, input#gender-female');
-      if (femaleRadio && (femaleRadio.getAttribute('aria-checked') === 'false' || (femaleRadio.type === 'radio' && !femaleRadio.checked))) {
-        femaleRadio.click();
-      }
-    }
-
-    // 電話
-    const phoneInput = document.querySelector('input#phone, input[data-cy="phone"], input[type="tel"], input[name="phone"]');
-    if (phoneInput && config.userPhone && phoneInput.value !== config.userPhone) {
-      setReactInputValue(phoneInput, config.userPhone);
-    }
-
-    // Email
-    const emailInput = document.querySelector('input#email, input[data-cy="email"], input[type="email"], input[name="email"]');
-    if (emailInput && config.userEmail && emailInput.value !== config.userEmail) {
-      setReactInputValue(emailInput, config.userEmail);
-    }
-
-    // 備註
-    const noteArea = document.querySelector('textarea, input#note, input[name="note"]');
-    if (noteArea && config.bookingNote && noteArea.value !== config.bookingNote) {
-      setReactTextareaValue(noteArea, config.bookingNote);
-    }
-
-    // 勾選所有條款與保證金政策核取方塊 (含 button[role="checkbox"])
-    const allCheckboxes = Array.from(
-      document.querySelectorAll('input[type="checkbox"], button[role="checkbox"], [role="checkbox"]')
-    );
-    allCheckboxes.forEach((cb) => {
-      // 略過非必要的行銷活動核取
-      if (cb.id === 'marketing-optin') return;
-
-      if (cb.type === 'checkbox') {
-        if (!cb.checked && !cb.disabled) cb.click();
-      } else if (cb.getAttribute('aria-checked') === 'false' || cb.getAttribute('data-state') === 'unchecked') {
-        cb.click();
-      }
-    });
-
-    addLog('📝 已自動填妥聯絡人資料與條款勾選');
-
-    // 檢查是否有信用卡保證金 (Deposit Policy)
-    const hasCreditCardIframe = !!document.querySelector('iframe[src*="card"], iframe[src*="tappay"], #cardholder-name');
-    if (hasCreditCardIframe) {
-      addLog('💳 偵測到需要信用卡保證金！依資安規範暫停自動送出，請手動確認填寫卡號！');
-      playSuccessSound();
-      showNotification('Inline 搶位提醒', '已成功鎖定時段！請立即於視窗確認並完成信用卡預授權。');
-      stopSniper();
-      return;
-    }
-
-    // 全自動點擊送出（高頻等待 React 表單完成驗證並解鎖按鈕）
-    addLog('🚀 啟動全自動送出程序，正在尋找確認預約按鈕...');
-    let submitAttempts = 0;
-    const submitInterval = setInterval(() => {
-      submitAttempts++;
-      const submitBtn = findSubmitButton();
-      if (submitBtn) {
-        clearInterval(submitInterval);
-        addLog(`🚀 成功自動點擊【${submitBtn.innerText.trim()}】！完成預約送出！`);
-        submitBtn.click();
+    InlineDomAdapter.submitReservation({
+      name: config.userName,
+      gender: config.userGender,
+      phone: config.userPhone,
+      email: config.userEmail,
+      note: config.bookingNote,
+    }, {
+      autoSubmit: config.autoSubmitFree,
+    }).then((res) => {
+      if (res.status === 'CONFIRMED') {
         playSuccessSound();
         showNotification('Inline 訂位完成', '已自動為您點擊送出完成預約！請檢查信箱或簡訊確認信。');
         stopSniper();
-      } else if (submitAttempts >= 25) {
-        clearInterval(submitInterval);
-        addLog('🔔 已為您填好所有個資，請點擊畫面下方按鈕完成預訂！');
+      } else if (res.status === 'DEPOSIT_REQUIRED') {
+        playSuccessSound();
+        showNotification('Inline 搶位提醒', '已成功鎖定時段！請立即於視窗確認並完成信用卡預授權。');
+        stopSniper();
+      } else if (res.status === 'SUBMIT_TIMEOUT' || res.status === 'HELD_FOR_MANUAL_SUBMISSION') {
         playSuccessSound();
         showNotification('Inline 搶位成功', '時段已鎖定！請點擊頁面送出完成預約。');
         stopSniper();
       }
-    }, 120);
-  }
-
-  // 點擊時段選取後的確認/下一步按鈕 (例如「完成預訂」或「下一步」)
-  function clickSlotContinueButton() {
-    const candidateButtons = Array.from(
-      document.querySelectorAll('button, a, div[role="button"], input[type="button"]')
-    );
-    const nextBtn = candidateButtons.find((btn) => {
-      if (btn.disabled || btn.classList.contains('disabled') || btn.getAttribute('aria-disabled') === 'true') return false;
-      const txt = (btn.innerText || btn.value || '').trim();
-      return /完成預訂|下一步|繼續|確認時段|立即預訂|Next|Continue/i.test(txt);
     });
-    if (nextBtn && nextBtn.offsetParent !== null) {
-      nextBtn.click();
-      addLog(`👉 已自動點擊時段確認按鈕：【${nextBtn.innerText.trim()}】`);
-      return true;
-    }
-    return false;
   }
 
   // 轉移並等待進入聯絡人表單流程 (無縫串接：選時段 ➔ 點「完成預訂」 ➔ 自動解須知 ➔ 自動填表 ➔ 自動點「確認訂位」)
@@ -1002,7 +1093,7 @@
   }
 
   function init() {
-    if (!window.location.hostname.includes('inline.app')) return;
+    if (typeof window === 'undefined' || !window.location || !window.location.hostname || !window.location.hostname.includes('inline.app')) return;
 
     ensureFloatingPanel();
     handleHouseRules();
@@ -1030,4 +1121,11 @@
   }
 
   init();
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      createInlineDomAdapter,
+      InlineDomAdapter,
+    };
+  }
 })();
