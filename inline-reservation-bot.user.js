@@ -763,18 +763,42 @@
     }, 120);
   }
 
-  // 轉移並等待進入聯絡人表單流程 (無縫串接：選時段 ➔ 自動解須知 ➔ 自動填表 ➔ 自動送出)
+  // 點擊時段選取後的確認/下一步按鈕 (例如「完成預訂」或「下一步」)
+  function clickSlotContinueButton() {
+    const candidateButtons = Array.from(
+      document.querySelectorAll('button, a, div[role="button"], input[type="button"]')
+    );
+    const nextBtn = candidateButtons.find((btn) => {
+      if (btn.disabled || btn.classList.contains('disabled') || btn.getAttribute('aria-disabled') === 'true') return false;
+      const txt = (btn.innerText || btn.value || '').trim();
+      return /完成預訂|下一步|繼續|確認時段|立即預訂|Next|Continue/i.test(txt);
+    });
+    if (nextBtn && nextBtn.offsetParent !== null) {
+      nextBtn.click();
+      addLog(`👉 已自動點擊時段確認按鈕：【${nextBtn.innerText.trim()}】`);
+      return true;
+    }
+    return false;
+  }
+
+  // 轉移並等待進入聯絡人表單流程 (無縫串接：選時段 ➔ 點「完成預訂」 ➔ 自動解須知 ➔ 自動填表 ➔ 自動點「確認訂位」)
   function proceedToContactForm() {
-    addLog('⏳ 時段已鎖定！正在自動處理規則須知並等待進入聯絡資訊表單...');
+    addLog('⏳ 時段已鎖定！正在點擊完成預訂並推進流程...');
+
+    // 立即嘗試點擊一次「完成預訂」
+    clickSlotContinueButton();
 
     let formAttempts = 0;
     const formWaitInterval = setInterval(() => {
       formAttempts++;
 
-      // 1. 若有規則須知彈窗，持續秒按同意
+      // 1. 若時段頁面的「完成預訂 / 下一步」按鈕尚未按成功，持續秒按
+      clickSlotContinueButton();
+
+      // 2. 若有規則須知彈窗，持續秒按同意
       handleHouseRules();
 
-      // 2. 檢查聯絡資訊表單是否已經渲染出現在 DOM 中
+      // 3. 檢查聯絡資訊表單是否已經渲染出現在 DOM 中
       const nameInput = document.querySelector('input#name, input[data-cy="name"], form#contact-form');
       if (nameInput) {
         clearInterval(formWaitInterval);
@@ -783,10 +807,10 @@
         return;
       }
 
-      // 15 秒保護超時
-      if (formAttempts >= 120) {
+      // 20 秒保護超時
+      if (formAttempts >= 180) {
         clearInterval(formWaitInterval);
-        addLog('⚠️ 等待聯絡資訊表單超時，請檢查畫面');
+        addLog('⚠️ 等待聯絡資訊表單超時，請檢查畫面是否需要手動點擊');
       }
     }, 100);
   }
