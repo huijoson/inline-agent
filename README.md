@@ -60,6 +60,7 @@
 
 ## 📚 專案架構與領域規範
 
+- 📘 **[完整使用者操作手冊 (USER_GUIDE.md)](./USER_GUIDE.md)**：包含 Chrome MV3 安裝、參數設定、實戰人機協同與對抗 PerimeterX 按壓防護的完整教學指南。
 - 📖 [CONTEXT.md](./CONTEXT.md)：定義本系統之領域術語（如 Reservation, Priority Slot List, Deposit Policy 等）。
 - 🏛️ [ADR 0001: Adopt Tampermonkey Userscript Architecture](./docs/adr/0001-userscript-architecture.md)：說明採用本機油猴腳本而非外部 CDP 腳本以規避 PerimeterX 的架構決策。
 - 🏛️ [ADR 0002: Soft Re-triggering Over Full Page Reload](./docs/adr/0002-soft-retrigger-over-full-reload.md)：說明開搶時採用毫秒級軟刷新機制以將延遲降至最低的考量。
