@@ -73,7 +73,7 @@
   // 2. 音效與系統通知模組 (Web Audio & Notification)
   // ==========================================
   function playSuccessSound() {
-    if (!config.soundAlert) return;
+    if (typeof window === 'undefined' || !config.soundAlert) return;
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
@@ -100,7 +100,7 @@
   }
 
   function playAlertSound() {
-    if (!config.soundAlert) return;
+    if (typeof window === 'undefined' || !config.soundAlert) return;
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
@@ -579,6 +579,20 @@
       }
     }
 
+    function findClickableButton(textRegex, excludeRegex = null) {
+      if (!doc) return null;
+      const candidates = Array.from(
+        doc.querySelectorAll('button, a, div[role="button"], input[type="button"], input[type="submit"], span[role="button"]')
+      );
+      return candidates.find((btn) => {
+        if (!isElementClickable(btn)) return false;
+        const txt = (btn.innerText || btn.value || '').trim();
+        if (!textRegex.test(txt)) return false;
+        if (excludeRegex && excludeRegex.test(txt)) return false;
+        return true;
+      });
+    }
+
     return {
       acknowledgeHouseRules() {
         if (!doc) return false;
@@ -603,17 +617,10 @@
             }
           });
 
-          const candidateButtons = Array.from(
-            doc.querySelectorAll('button, a, div[role="button"], input[type="button"], span[role="button"]')
+          const confirmBtn = findClickableButton(
+            /我已閱讀並同意|我同意|我知道了|同意並繼續|繼續訂位|同意|我知道|確定|繼續|OK|Agree/i,
+            /取消|不同意|Close/i
           );
-          const confirmBtn = candidateButtons.find((btn) => {
-            if (!isElementClickable(btn)) return false;
-            const txt = (btn.innerText || btn.value || '').trim();
-            return (
-              /我已閱讀並同意|我同意|我知道了|同意並繼續|繼續訂位|同意|我知道|確定|繼續|OK|Agree/i.test(txt) &&
-              !/取消|不同意|Close/i.test(txt)
-            );
-          });
 
           if (confirmBtn) {
             confirmBtn.click();
@@ -709,14 +716,7 @@
       clickSlotContinueButton() {
         if (!doc) return false;
         try {
-          const candidateButtons = Array.from(
-            doc.querySelectorAll('button, a, div[role="button"], input[type="button"]')
-          );
-          const nextBtn = candidateButtons.find((btn) => {
-            if (!isElementClickable(btn)) return false;
-            const txt = (btn.innerText || btn.value || '').trim();
-            return /完成預訂|下一步|繼續|確認時段|立即預訂|Next|Continue/i.test(txt);
-          });
+          const nextBtn = findClickableButton(/完成預訂|下一步|繼續|確認時段|立即預訂|Next|Continue/i);
           if (nextBtn) {
             nextBtn.click();
             log(`👉 已自動點擊時段確認按鈕：【${nextBtn.innerText.trim()}】`);
@@ -730,7 +730,7 @@
 
       isContactFormPage() {
         if (!doc) return false;
-        return !!(doc.getElementById('contact-form') || doc.querySelector('input#name, input#phone'));
+        return !!(doc.getElementById('contact-form') || doc.querySelector('input#name, input#phone, input[data-cy="name"]'));
       },
 
       hasCreditCardDeposit() {
@@ -743,14 +743,9 @@
         const directSubmit = doc.querySelector('button[data-cy="submit"], button[type="submit"].eERBSs');
         if (directSubmit && isElementClickable(directSubmit)) return directSubmit;
 
-        const candidateButtons = Array.from(
-          doc.querySelectorAll('button, input[type="submit"], div[role="button"], a[role="button"]')
+        return findClickableButton(
+          /確認訂位|完成預訂|確認預約|立即預訂|送出預訂|確認送出|確認|下一步|Confirm|Reserve|Complete/i
         );
-        return candidateButtons.find((btn) => {
-          if (!isElementClickable(btn)) return false;
-          const txt = (btn.innerText || btn.value || '').trim();
-          return /確認訂位|完成預訂|確認預約|立即預訂|送出預訂|確認送出|確認|下一步|Confirm|Reserve|Complete/i.test(txt);
-        });
       },
 
       fillGuestDetails(guest) {
@@ -804,52 +799,72 @@
 
       submitReservation(guestDetails, policy = { autoSubmit: true }) {
         return new Promise((resolve) => {
-          this.fillGuestDetails(guestDetails);
+          let waitAttempts = 0;
 
-          if (this.hasCreditCardDeposit()) {
-            log('💳 偵測到需要信用卡保證金！依資安規範暫停自動送出，請手動確認填寫卡號！');
-            resolve({
-              success: false,
-              status: 'DEPOSIT_REQUIRED',
-              message: 'Credit card deposit required',
-            });
-            return;
-          }
+          const proceedToForm = () => {
+            waitAttempts++;
+            // 點擊時段確認按鈕推進流程
+            this.clickSlotContinueButton();
+            this.acknowledgeHouseRules();
 
-          if (!policy.autoSubmit) {
-            log('🔔 依預約政策暫停自動送出，請確認畫面資訊後手動點擊送出！');
-            resolve({
-              success: false,
-              status: 'HELD_FOR_MANUAL_SUBMISSION',
-              message: 'Held for manual submission',
-            });
-            return;
-          }
+            const isFormReady = this.isContactFormPage();
+            if (isFormReady || waitAttempts >= 20) {
+              fillAndSubmit();
+            } else {
+              setTimeout(proceedToForm, 100);
+            }
+          };
 
-          log('🚀 啟動全自動送出程序，正在等待確認預約按鈕...');
-          let attempts = 0;
-          const interval = setInterval(() => {
-            attempts++;
-            const submitBtn = this.findSubmitButton();
-            if (submitBtn) {
-              clearInterval(interval);
-              log(`🚀 成功自動點擊【${submitBtn.innerText.trim()}】！完成預約送出！`);
-              submitBtn.click();
-              resolve({
-                success: true,
-                status: 'CONFIRMED',
-                message: 'Reservation submitted successfully',
-              });
-            } else if (attempts >= 25) {
-              clearInterval(interval);
-              log('🔔 已填妥個資，但未偵測到送出按鈕，請手動確認送出！');
+          const fillAndSubmit = () => {
+            this.fillGuestDetails(guestDetails);
+
+            if (this.hasCreditCardDeposit()) {
+              log('💳 偵測到需要信用卡保證金！依資安規範暫停自動送出，請手動確認填寫卡號！');
               resolve({
                 success: false,
-                status: 'SUBMIT_TIMEOUT',
-                message: 'Submit button timed out',
+                status: 'DEPOSIT_REQUIRED',
+                message: 'Credit card deposit required',
               });
+              return;
             }
-          }, 120);
+
+            if (!policy.autoSubmit) {
+              log('🔔 依預約政策暫停自動送出，請確認畫面資訊後手動點擊送出！');
+              resolve({
+                success: false,
+                status: 'HELD_FOR_MANUAL_SUBMISSION',
+                message: 'Held for manual submission',
+              });
+              return;
+            }
+
+            log('🚀 啟動全自動送出程序，正在等待確認預約按鈕...');
+            let attempts = 0;
+            const interval = setInterval(() => {
+              attempts++;
+              const submitBtn = this.findSubmitButton();
+              if (submitBtn) {
+                clearInterval(interval);
+                log(`🚀 成功自動點擊【${submitBtn.innerText.trim()}】！完成預約送出！`);
+                submitBtn.click();
+                resolve({
+                  success: true,
+                  status: 'CONFIRMED',
+                  message: 'Reservation submitted successfully',
+                });
+              } else if (attempts >= 25) {
+                clearInterval(interval);
+                log('🔔 已填妥個資，但未偵測到送出按鈕，請手動確認送出！');
+                resolve({
+                  success: false,
+                  status: 'SUBMIT_TIMEOUT',
+                  message: 'Submit button timed out',
+                });
+              }
+            }, 120);
+          };
+
+          proceedToForm();
         });
       },
 
@@ -863,13 +878,26 @@
   // 6. 搶位排程引擎模組 (SnipingEngine)
   // 依據 ADR-0003 透過 ReservationTarget 縫隙驅動開搶與撿漏，絕不直接碰觸 DOM
   // ==========================================
+  // 6. 搶位排程引擎模組 (SnipingEngine)
+  // 依據 ADR-0003 透過 ReservationTarget 縫隙驅動開搶與撿漏，絕不直接碰觸 DOM
+  // ==========================================
+  function parsePrioritySlots(rawSlots) {
+    if (!rawSlots) return [];
+    return String(rawSlots)
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
   const SnipingState = {
     IDLE: 'IDLE',
     COUNTDOWN: 'COUNTDOWN',
     ACTIVE_SNIPING: 'ACTIVE_SNIPING',
-    AWAITING_FORM: 'AWAITING_FORM',
+    AWAITING_MANUAL_DEPOSIT: 'AWAITING_MANUAL_DEPOSIT',
     COMPLETED: 'COMPLETED',
-    HALTED_DEPOSIT: 'HALTED_DEPOSIT',
+    // 相容別名 (Compatibility Aliases)
+    AWAITING_FORM: 'ACTIVE_SNIPING',
+    HALTED_DEPOSIT: 'AWAITING_MANUAL_DEPOSIT',
   };
 
   function createSnipingEngine(deps = {}) {
@@ -887,7 +915,6 @@
     let timerId = null;
     let pollTimeoutId = null;
     let dropIntervalId = null;
-    let formWaitIntervalId = null;
 
     function setStatus(newStatus, displayTxt, timeStr, running = true) {
       currentStatus = newStatus;
@@ -900,11 +927,9 @@
       if (timerId) clearInterval(timerId);
       if (pollTimeoutId) clearTimeout(pollTimeoutId);
       if (dropIntervalId) clearInterval(dropIntervalId);
-      if (formWaitIntervalId) clearInterval(formWaitIntervalId);
       timerId = null;
       pollTimeoutId = null;
       dropIntervalId = null;
-      formWaitIntervalId = null;
     }
 
     function stop() {
@@ -917,6 +942,7 @@
 
     function submitCurrentReservation() {
       const cfg = configProvider();
+      setStatus(SnipingState.ACTIVE_SNIPING, '🟢 鎖定時段，提交中...', '--:--:--', true);
       adapter.submitReservation({
         name: cfg.userName,
         gender: cfg.userGender,
@@ -927,49 +953,24 @@
         autoSubmit: cfg.autoSubmitFree,
       }).then((res) => {
         if (res.status === 'CONFIRMED') {
+          clearAllTimers();
+          state.isRunning = false;
           setStatus(SnipingState.COMPLETED, '🟢 預約完成', '00:00:00', false);
           onNotify('Inline 訂位完成', '已自動為您點擊送出完成預約！請檢查信箱或簡訊確認信。');
-          stop();
         } else if (res.status === 'DEPOSIT_REQUIRED') {
-          setStatus(SnipingState.HALTED_DEPOSIT, '💳 需保證金', '--:--:--', false);
+          clearAllTimers();
+          state.isRunning = false;
+          setStatus(SnipingState.AWAITING_MANUAL_DEPOSIT, '💳 需保證金', '--:--:--', false);
           onNotify('Inline 搶位提醒', '已成功鎖定時段！請立即於視窗確認並完成信用卡預授權。');
-          stop();
         } else if (res.status === 'SUBMIT_TIMEOUT' || res.status === 'HELD_FOR_MANUAL_SUBMISSION') {
+          clearAllTimers();
+          state.isRunning = false;
           setStatus(SnipingState.COMPLETED, '🔔 時段已鎖定', '--:--:--', false);
           onNotify('Inline 搶位成功', '時段已鎖定！請點擊頁面送出完成預約。');
-          stop();
         }
       }).catch((err) => {
         logger(`❌ 送出預約時發生異常: ${err?.message || err}`);
       });
-    }
-
-    function proceedToContactForm() {
-      setStatus(SnipingState.AWAITING_FORM, '🟡 前往表單中', '--:--:--', true);
-      logger('⏳ 時段已鎖定！正在推進流程進入聯絡人表單...');
-
-      adapter.clickSlotContinueButton();
-
-      let formAttempts = 0;
-      formWaitIntervalId = setInterval(() => {
-        formAttempts++;
-        adapter.clickSlotContinueButton();
-        adapter.acknowledgeHouseRules();
-
-        if (adapter.isContactFormPage()) {
-          clearInterval(formWaitIntervalId);
-          formWaitIntervalId = null;
-          logger('📋 已順利進入聯絡資訊頁面，開始填表與預約流程！');
-          submitCurrentReservation();
-          return;
-        }
-
-        if (formAttempts >= 180) {
-          clearInterval(formWaitIntervalId);
-          formWaitIntervalId = null;
-          logger('⚠️ 等待聯絡資訊表單超時，請檢查畫面是否需手動確認');
-        }
-      }, 100);
     }
 
     function executeCancellationCycle() {
@@ -977,17 +978,12 @@
       const cfg = configProvider();
       adapter.setPartySize(cfg.adults, cfg.kids);
 
-      if (adapter.isContactFormPage()) {
-        submitCurrentReservation();
-        return;
-      }
-
       adapter.selectDate(cfg.targetDate);
-      const priorityList = (cfg.prioritySlots || '').split(',').map((s) => s.trim()).filter(Boolean);
+      const priorityList = parsePrioritySlots(cfg.prioritySlots);
       const picked = adapter.claimSlot(priorityList);
 
       if (picked) {
-        proceedToContactForm();
+        submitCurrentReservation();
       } else {
         scheduleNextPoll();
       }
@@ -1028,7 +1024,8 @@
       if (timerId) clearInterval(timerId);
       timerId = setInterval(() => {
         const remainingMs = dropDate.getTime() - timeProvider();
-        if (remainingMs <= 0) {
+        const leadTime = Number(cfg.leadTimeMs) || 0;
+        if (remainingMs <= leadTime) {
           clearInterval(timerId);
           timerId = null;
           setStatus(SnipingState.ACTIVE_SNIPING, '🟢 開搶觸發中！', '00:00:00', true);
@@ -1046,27 +1043,42 @@
     function triggerDropAction() {
       logger('⚡ 開搶時間到達！執行毫秒級搶位程序！');
       const cfg = configProvider();
-      const priorityList = (cfg.prioritySlots || '').split(',').map((s) => s.trim()).filter(Boolean);
+      const priorityList = parsePrioritySlots(cfg.prioritySlots);
 
       let attempts = 0;
-      dropIntervalId = setInterval(() => {
+      function attempt() {
         attempts++;
         adapter.acknowledgeHouseRules();
         adapter.setPartySize(cfg.adults, cfg.kids);
         adapter.selectDate(cfg.targetDate);
         const picked = adapter.claimSlot(priorityList);
 
-        if (picked || attempts >= 30) {
-          clearInterval(dropIntervalId);
-          dropIntervalId = null;
-          if (picked) {
-            proceedToContactForm();
-          } else {
-            logger('❌ 搶位結束：指定時段未能成功取得');
-            stop();
+        if (picked) {
+          if (dropIntervalId) {
+            clearInterval(dropIntervalId);
+            dropIntervalId = null;
           }
+          submitCurrentReservation();
+          return true;
         }
-      }, 120);
+
+        if (attempts >= 30) {
+          if (dropIntervalId) {
+            clearInterval(dropIntervalId);
+            dropIntervalId = null;
+          }
+          logger('❌ 搶位結束：指定時段未能成功取得');
+          stop();
+          return false;
+        }
+        return false;
+      }
+
+      // 0ms 首拍立即執行，消除 120ms 初始延遲
+      const instantPicked = attempt();
+      if (!instantPicked && attempts < 30) {
+        dropIntervalId = setInterval(attempt, 120);
+      }
     }
 
     function start() {
@@ -1074,9 +1086,10 @@
       state.isRunning = true;
       const cfg = configProvider();
       setStatus(SnipingState.ACTIVE_SNIPING, '🟢 運行中', '--:--:--', true);
-      logger(`🚀 搶位程序啟動 [模式: ${cfg.mode === 'drop' ? '準時放位' : '撿漏輪詢'}]`);
+      logger(`🚀 搶位程序啟動 [模式: ${cfg.mode === 'drop' ? '準時放位' : '釋出撿漏'}]`);
 
-      if (adapter.isContactFormPage()) {
+      // 若目前畫面已就緒聯絡資訊表單，直接進入送出程序
+      if (adapter.isContactFormPage && adapter.isContactFormPage()) {
         logger('📋 偵測到已在聯絡資訊頁面，立即執行自動填表與送出！');
         submitCurrentReservation();
         return;
@@ -1095,7 +1108,7 @@
       getStatus: () => currentStatus,
       triggerDropAction,
       executeCancellationCycle,
-      proceedToContactForm,
+      proceedToContactForm: submitCurrentReservation,
       scheduleNextPoll,
       scheduleDropSnipe,
       submitCurrentReservation,

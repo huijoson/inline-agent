@@ -56,12 +56,12 @@ function createMockDocument(elements = []) {
         return elements.filter((e) => e.type === 'checkbox' || e.getAttribute('role') === 'checkbox');
       }
       if (selector.includes('button')) {
-        return elements.filter((e) => e.tagName === 'BUTTON' || e.getAttribute('role') === 'button');
+        return elements.filter((e) => e.tagName === 'BUTTON' || e.getAttribute('role') === 'button' || (e.classList && e.classList.contains('time-slot')));
       }
       if (selector.includes('data-date')) {
         return elements.filter((e) => e.hasAttribute('data-date'));
       }
-      return [];
+      return elements;
     },
     querySelector(selector) {
       if (selector.includes('iframe')) {
@@ -72,6 +72,15 @@ function createMockDocument(elements = []) {
       }
       if (selector.includes('#kid-picker') || selector.includes('select[name="kid"]')) {
         return elements.find((e) => e.id === 'kid-picker' || e.name === 'kid') || null;
+      }
+      if (selector.includes('submit')) {
+        return elements.find((e) => (e.innerText && /完成預訂|確認/i.test(e.innerText)) || e.id === 'submit-btn') || null;
+      }
+      if (selector.includes('phone')) {
+        return elements.find((e) => e.id === 'phone' || e.name === 'phone') || null;
+      }
+      if (selector.includes('email')) {
+        return elements.find((e) => e.id === 'email' || e.name === 'email') || null;
       }
       if (selector.includes('name')) {
         return elements.find((e) => e.id === 'name' || e.name === 'name') || null;
@@ -156,18 +165,60 @@ describe('InlineDomAdapter Unit Tests (Issue #3)', () => {
     });
   });
 
-  describe('React Prototype Descriptor Value Override', () => {
-    it('overrides input value using prototype descriptor and dispatches events', () => {
-      let inputEvents = [];
-      const input = createMockElement('input', { id: 'name', value: '' });
-      input.addEventListener('input', () => inputEvents.push('input'));
-      input.addEventListener('change', () => inputEvents.push('change'));
+  describe('claimSlot() with DOM button fixtures', () => {
+    it('clicks the available slot button matching priority list', () => {
+      let clickedSlot = null;
+      const slot1 = createMockElement('button', {
+        innerText: '18:00 (已滿)',
+        className: 'time-slot disabled',
+        disabled: true,
+      });
+      const slot2 = createMockElement('button', {
+        innerText: '19:00',
+        className: 'time-slot',
+      });
+      slot2.addEventListener('click', () => {
+        clickedSlot = '19:00';
+      });
 
-      const adapter = createInlineDomAdapter({ document: createMockDocument([]), logger: () => {} });
-      adapter._setReactValue(input, 'Antigravity');
+      const doc = createMockDocument([slot1, slot2]);
+      const adapter = createInlineDomAdapter({ document: doc, logger: () => {} });
 
-      assert.equal(input.value, 'Antigravity');
-      assert.deepEqual(inputEvents, ['input', 'change']);
+      const claimed = adapter.claimSlot(['19:00', '20:00']);
+      assert.equal(claimed, '19:00');
+      assert.equal(clickedSlot, '19:00');
+    });
+  });
+
+  describe('submitReservation() with DOM form fixtures', () => {
+    it('populates inputs using prototype setters and clicks confirmation button', async () => {
+      const nameInput = createMockElement('input', { id: 'name', value: '' });
+      const phoneInput = createMockElement('input', { id: 'phone', value: '' });
+      const emailInput = createMockElement('input', { id: 'email', value: '' });
+      const submitBtn = createMockElement('button', {
+        id: 'submit-btn',
+        innerText: '確認訂位',
+      });
+
+      let submitted = false;
+      submitBtn.addEventListener('click', () => {
+        submitted = true;
+      });
+
+      const doc = createMockDocument([nameInput, phoneInput, emailInput, submitBtn]);
+      const adapter = createInlineDomAdapter({ document: doc, logger: () => {} });
+
+      const result = await adapter.submitReservation({
+        name: '王小明',
+        phone: '0912345678',
+        email: 'wang@example.com',
+      }, { autoSubmit: true });
+
+      assert.equal(result.success, true);
+      assert.equal(result.status, 'CONFIRMED');
+      assert.equal(nameInput.value, '王小明');
+      assert.equal(phoneInput.value, '0912345678');
+      assert.equal(submitted, true);
     });
   });
 

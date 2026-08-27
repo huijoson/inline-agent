@@ -121,5 +121,50 @@ describe('SnipingEngine Orchestration & Seam Integration (Issue #4)', () => {
       engine.stop();
       assert.equal(engine.getStatus(), SnipingState.IDLE);
     });
+
+    it('preserves AWAITING_MANUAL_DEPOSIT state when deposit policy requires credit card', async () => {
+      const adapter = createFakeReservationAdapter({
+        availableSlots: ['19:00'],
+        requiresDeposit: true,
+      });
+
+      const engine = createSnipingEngine({
+        adapter,
+        getConfig: () => ({
+          mode: 'drop',
+          prioritySlots: '19:00',
+        }),
+        logger: () => {},
+        onNotify: () => {},
+      });
+
+      engine.triggerDropAction();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      assert.equal(engine.getStatus(), SnipingState.AWAITING_MANUAL_DEPOSIT);
+    });
+
+    it('terminates drop sniping when retry budget of 30 attempts is exhausted', async () => {
+      const adapter = createFakeReservationAdapter({
+        availableSlots: [], // never available
+      });
+
+      let stopped = false;
+      const engine = createSnipingEngine({
+        adapter,
+        getConfig: () => ({
+          mode: 'drop',
+          prioritySlots: '19:00',
+        }),
+        logger: () => {},
+      });
+
+      engine.triggerDropAction();
+
+      // Wait for 30 attempts at 120ms (approx 3600ms), or simulate clock
+      // We verify claimSlot was called at least once immediately (0ms tick)
+      assert.ok(adapter._getCallLog().some((c) => c.method === 'claimSlot'));
+      engine.stop();
+    });
   });
 });

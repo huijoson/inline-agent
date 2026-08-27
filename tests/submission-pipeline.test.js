@@ -33,10 +33,10 @@ describe('Autonomous Submission Pipeline & Deposit Policy Guard (Issue #5)', () 
     engine.start();
 
     // Give microtask tick for async submitReservation
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, 30));
 
-    // Verify engine halted
-    assert.equal(engine.getStatus(), SnipingState.IDLE);
+    // Verify engine halted in AWAITING_MANUAL_DEPOSIT state
+    assert.equal(engine.getStatus(), SnipingState.AWAITING_MANUAL_DEPOSIT);
     assert.equal(notifications.length, 1);
     assert.equal(notifications[0].title, 'Inline 搶位提醒');
     assert.ok(notifications[0].body.includes('信用卡預授權'));
@@ -69,9 +69,9 @@ describe('Autonomous Submission Pipeline & Deposit Policy Guard (Issue #5)', () 
 
     engine.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, 30));
 
-    assert.equal(engine.getStatus(), SnipingState.IDLE);
+    assert.equal(engine.getStatus(), SnipingState.COMPLETED);
     assert.equal(notifications.length, 1);
     assert.equal(notifications[0].title, 'Inline 訂位完成');
     assert.ok(notifications[0].body.includes('完成預約'));
@@ -104,9 +104,9 @@ describe('Autonomous Submission Pipeline & Deposit Policy Guard (Issue #5)', () 
 
     engine.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, 30));
 
-    assert.equal(engine.getStatus(), SnipingState.IDLE);
+    assert.equal(engine.getStatus(), SnipingState.COMPLETED);
     assert.equal(notifications.length, 1);
     assert.equal(notifications[0].title, 'Inline 搶位成功');
     assert.ok(notifications[0].body.includes('請點擊頁面送出'));

@@ -4,7 +4,7 @@ const { createFakeReservationAdapter } = require('./reservation-target-seam');
 
 describe('ReservationTarget Seam Contract & Invariants', () => {
   describe('House Rules Acknowledgment', () => {
-    it('returns false when no house rules popup or terms are active', () => {
+    it('returns false when no house rules or terms are active', () => {
       const adapter = createFakeReservationAdapter({ houseRulesActive: false });
       const result = adapter.acknowledgeHouseRules();
       assert.equal(result, false);
@@ -24,7 +24,7 @@ describe('ReservationTarget Seam Contract & Invariants', () => {
   });
 
   describe('Party Size Configuration', () => {
-    it('updates adult and child guest counts cleanly', () => {
+    it('updates adult and child party size cleanly', () => {
       const adapter = createFakeReservationAdapter();
       adapter.setPartySize(4, 2);
       assert.deepEqual(adapter._getState().partySize, { adults: 4, kids: 2 });
