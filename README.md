@@ -21,19 +21,22 @@
 
 ## 🚀 快速安裝與使用步驟
 
-### 第一步：安裝 Tampermonkey 擴充功能
-若您的 Chrome 尚未安裝 Tampermonkey（油猴）：
-1. 前往 [Chrome 線上應用程式商店 - Tampermonkey](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo)。
-2. 點擊「加到 Chrome」完成安裝。
+### 第一步：安裝 Tampermonkey 擴充功能並啟用開發人員模式
+1. 前往 [Chrome 線上應用程式商店 - Tampermonkey](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo) 點擊「加到 Chrome」完成安裝。
+2. **⚠️ 關鍵步驟（Chrome Manifest V3 必做）**：
+   - 在網址列輸入 `chrome://extensions` 並按下 Enter。
+   - 將右上角的「**開發人員模式 (Developer mode)**」切換為**開啟**（否則 Chrome 會禁止 Tampermonkey 執行任何使用者腳本）。
 
 ### 第二步：載入搶位腳本
 1. 點擊 Chrome 工具列的 Tampermonkey 圖示，選擇「**新增腳本**」。
-2. 將本專案中的 [`inline-reservation-bot.user.js`](./inline-reservation-bot.user.js) 內容完整複製。
-3. 貼上至 Tampermonkey 編輯器中，按快捷鍵 `Ctrl + S` (Mac: `Cmd + S`) 儲存腳本。
+2. 將本專案中的 [`inline-reservation-bot.user.js`](./inline-reservation-bot.user.js) 內容完整複製貼入編輯器中。
+3. 按快捷鍵 `Ctrl + S` (Mac: `Cmd + S`) 儲存腳本。
 
 ### 第三步：開啟目標餐廳訂位頁面
-1. 在 Chrome 開啟您想預約的餐廳 inline 訂位網址（例如從 [inline 燒肉分類](https://dining.inline.app/zh-tw/discover/dining-type/yakiniku) 點入各店家，網址格式為 `https://inline.app/booking/...`）。
-2. 頁面右下角會自動出現「**⚡ Inline 搶位助手**」懸浮按鈕。
+> [!IMPORTANT]
+> - **探索/目錄頁面**（例如 `https://dining.inline.app/zh-tw/discover/...`）是餐廳列表總覽，**尚未進入任何一家店的訂位系統**。
+> - 請在該列表內點選您想預約的餐廳右側「**訂位 &#8599;**」按鈕，進入真正的**店家訂位頁面**（網址開頭為 `https://inline.app/booking/...`）。
+> - 頁面右下角會常駐「**⚡ Inline 搶位助手**」懸浮按鈕。在探索頁面亦可預先設定個人資料並儲存。
 
 ### 第四步：設定搶位參數
 點開右下角面板，設定您的預約條件：

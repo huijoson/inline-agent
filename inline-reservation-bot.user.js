@@ -4,9 +4,8 @@
 // @version      1.0.0
 // @description  支援準時放位開搶 (Opening Drop) 與釋出撿漏 (Cancellation Sniping)，自動校正伺服器時間、秒選時段、填寫表單並提供音效與桌面通知。
 // @author       Antigravity
-// @match        https://inline.app/booking/*
-// @match        https://*.inline.app/booking/*
-// @match        https://dining.inline.app/*
+// @match        https://inline.app/*
+// @match        https://*.inline.app/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_notification
@@ -157,6 +156,14 @@
     }
   }
 
+  function isBookingPage() {
+    return (
+      window.location.pathname.includes('/booking/') ||
+      window.location.pathname.includes('/branch/') ||
+      !!document.querySelector('#date-picker, input#name, button.time-slot, form[action*="booking"]')
+    );
+  }
+
   function createFloatingPanel() {
     if (document.getElementById('inline-auto-sniper-panel')) return;
 
@@ -168,7 +175,7 @@
           position: fixed;
           bottom: 20px;
           right: 20px;
-          z-index: 999999;
+          z-index: 2147483647;
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang TC", sans-serif;
           color: #333;
         }
@@ -322,6 +329,11 @@
             <span id="ias-countdown">--:--:--</span>
           </div>
 
+          <div id="ias-page-tip" style="${isBookingPage() ? 'display: none;' : 'display: block;'} background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; padding: 10px; border-radius: 8px; font-size: 12px; margin-bottom: 12px; line-height: 1.5;">
+            📍 <b>目前在探索目錄頁</b><br>
+            請點選本頁任一餐廳的「<b>訂位 &#8599;</b>」進入專屬訂位頁面。您可先在下方填妥訂位人個資與偏好時段，並點擊「💾 儲存設定」！
+          </div>
+
           <div class="ias-group">
             <label>搶位模式 (Mode)</label>
             <select id="ias-mode">
@@ -417,11 +429,6 @@
     document.body.appendChild(container);
     bindPanelEvents();
     syncServerTime();
-
-    // 請求通知權限
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
   }
 
   function bindPanelEvents() {
@@ -434,6 +441,9 @@
 
     toggleBtn.addEventListener('click', () => {
       mainCard.style.display = mainCard.style.display === 'none' || !mainCard.style.display ? 'block' : 'none';
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+      }
     });
 
     closeBtn.addEventListener('click', () => {
@@ -449,6 +459,17 @@
     startBtn.addEventListener('click', () => {
       readInputsToConfig();
       saveConfig(config);
+
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+      }
+
+      if (!isBookingPage()) {
+        addLog('⚠️ 目前處於餐廳探索列表頁，請先點選想預約的餐廳「訂位 ↗」進入訂位頁後再啟動搶位！');
+        alert('【提醒】您目前在餐廳探索/推薦目錄頁，尚未進入任何店家的訂位頁面。\n\n請先在網頁中點選您想預約的餐廳「訂位 ↗」按鈕，進入專屬訂位頁面後再點擊啟動搶位！');
+        return;
+      }
+
       startSniper();
     });
 
@@ -801,17 +822,28 @@
   // ==========================================
   // 6. 初始化進入點
   // ==========================================
+  function ensureFloatingPanel() {
+    if (!window.location.hostname.includes('inline.app')) return;
+    if (document.getElementById('inline-auto-sniper-panel')) return;
+    if (!document.body) {
+      setTimeout(ensureFloatingPanel, 100);
+      return;
+    }
+    createFloatingPanel();
+  }
+
   function init() {
-    // 僅在 inline 頁面掛載
     if (!window.location.hostname.includes('inline.app')) return;
 
-    window.addEventListener('load', () => {
-      setTimeout(createFloatingPanel, 600);
-    });
+    ensureFloatingPanel();
 
-    if (document.readyState === 'complete' || document.readyState === 'interactive') {
-      setTimeout(createFloatingPanel, 600);
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', ensureFloatingPanel);
     }
+    window.addEventListener('load', ensureFloatingPanel);
+
+    // 每秒檢查一次，防止 SPA 頁面切換、水合 (Hydration) 或動態渲染將懸浮面板卸載
+    setInterval(ensureFloatingPanel, 1000);
   }
 
   init();
