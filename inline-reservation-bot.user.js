@@ -600,6 +600,17 @@
     return null;
   }
 
+  function findSubmitButton() {
+    const candidateButtons = Array.from(
+      document.querySelectorAll('button, input[type="submit"], div[role="button"], a[role="button"]')
+    );
+    return candidateButtons.find((btn) => {
+      if (btn.disabled || btn.classList.contains('disabled') || btn.getAttribute('aria-disabled') === 'true') return false;
+      const txt = (btn.innerText || btn.value || '').trim();
+      return /確認訂位|完成預訂|確認預約|立即預訂|送出預訂|確認送出|確認|下一步|Confirm|Reserve|Complete/i.test(txt);
+    });
+  }
+
   // 表單自動填寫
   function fillReservationForm() {
     // 姓名
@@ -662,22 +673,27 @@
       return;
     }
 
-    // 若無需訂金且開啟全自動送出
-    if (config.autoSubmitFree) {
-      const submitBtn = document.querySelector('button[type="submit"], button#submit-booking, button.submit-button');
-      if (submitBtn && !submitBtn.disabled) {
-        addLog('🚀 觸發自動確認送出！');
+    // 全自動點擊送出（高頻等待 React 表單完成驗證並解鎖按鈕）
+    addLog('🚀 啟動全自動送出程序，正在尋找確認預約按鈕...');
+    let submitAttempts = 0;
+    const submitInterval = setInterval(() => {
+      submitAttempts++;
+      const submitBtn = findSubmitButton();
+      if (submitBtn) {
+        clearInterval(submitInterval);
+        addLog(`🚀 成功自動點擊【${submitBtn.innerText.trim()}】！完成預約送出！`);
         submitBtn.click();
         playSuccessSound();
-        showNotification('Inline 訂位完成', '已自動送出訂位表單！請檢查信箱或簡訊確認信。');
+        showNotification('Inline 訂位完成', '已自動為您點擊送出完成預約！請檢查信箱或簡訊確認信。');
+        stopSniper();
+      } else if (submitAttempts >= 25) {
+        clearInterval(submitInterval);
+        addLog('🔔 已為您填好所有個資，請點擊畫面下方按鈕完成預訂！');
+        playSuccessSound();
+        showNotification('Inline 搶位成功', '時段已鎖定！請點擊頁面送出完成預約。');
         stopSniper();
       }
-    } else {
-      addLog('🔔 已鎖定時段並填好個資，請點擊送出按鈕完成預訂');
-      playSuccessSound();
-      showNotification('Inline 搶位成功', '時段已鎖定！請點擊頁面送出完成預約。');
-      stopSniper();
-    }
+    }, 120);
   }
 
   // 單次執行循環
