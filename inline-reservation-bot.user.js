@@ -763,6 +763,34 @@
     }, 120);
   }
 
+  // 轉移並等待進入聯絡人表單流程 (無縫串接：選時段 ➔ 自動解須知 ➔ 自動填表 ➔ 自動送出)
+  function proceedToContactForm() {
+    addLog('⏳ 時段已鎖定！正在自動處理規則須知並等待進入聯絡資訊表單...');
+
+    let formAttempts = 0;
+    const formWaitInterval = setInterval(() => {
+      formAttempts++;
+
+      // 1. 若有規則須知彈窗，持續秒按同意
+      handleHouseRules();
+
+      // 2. 檢查聯絡資訊表單是否已經渲染出現在 DOM 中
+      const nameInput = document.querySelector('input#name, input[data-cy="name"], form#contact-form');
+      if (nameInput) {
+        clearInterval(formWaitInterval);
+        addLog('📋 已順利進入聯絡資訊頁面，開始全自動填表與確認訂位！');
+        fillReservationForm();
+        return;
+      }
+
+      // 15 秒保護超時
+      if (formAttempts >= 120) {
+        clearInterval(formWaitInterval);
+        addLog('⚠️ 等待聯絡資訊表單超時，請檢查畫面');
+      }
+    }, 100);
+  }
+
   // 單次執行循環
   function executeSnipeCycle() {
     handleHouseRules();
@@ -782,10 +810,8 @@
     // 嘗試選取時段
     const picked = attemptPickSlot();
     if (picked) {
-      // 成功選到時段，等待短暫過渡至表單
-      setTimeout(() => {
-        fillReservationForm();
-      }, 350);
+      // 成功選到時段，平滑串接至表單處理
+      proceedToContactForm();
     } else {
       // 尚未有可選時段
       if (config.mode === 'cancellation') {
@@ -863,7 +889,7 @@
       if (picked || attempts >= 30) {
         clearInterval(dropInterval);
         if (picked) {
-          setTimeout(fillReservationForm, 300);
+          proceedToContactForm();
         } else {
           addLog('❌ 搶位結束：指定時段未能成功取得');
           stopSniper();
@@ -876,6 +902,14 @@
     state.isRunning = true;
     updateStatusUI('🟢 運行中', '--:--:--', true);
     addLog(`🚀 搶位程序啟動 [模式: ${config.mode === 'drop' ? '準時放位' : '撿漏輪詢'}]`);
+
+    // 若使用者目前已經在聯絡資訊表單頁，直接填寫並送出！
+    const onContactForm = document.getElementById('contact-form') || document.querySelector('input#name');
+    if (onContactForm) {
+      addLog('📋 偵測到已在聯絡資訊頁面，立即執行自動填表與送出！');
+      fillReservationForm();
+      return;
+    }
 
     if (config.mode === 'drop') {
       scheduleDropSnipe();
