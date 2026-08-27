@@ -510,19 +510,50 @@
   // 5. 核心自動化邏輯 (Core Automation)
   // ==========================================
 
-  // 自動同意用餐須知 (House Rules Modal)
+  // 自動同意用餐須知與注意事項 (House Rules Modal & Terms Checkboxes)
   function handleHouseRules() {
-    const buttons = Array.from(document.querySelectorAll('button, a, div[role="button"]'));
-    const confirmBtn = buttons.find((btn) => {
-      const txt = (btn.innerText || '').trim();
-      return txt === '我同意' || txt === '我知道了' || txt === '同意並繼續' || txt === 'OK' || txt === '確定' || txt === '繼續訂位';
+    let handled = false;
+
+    // 1. 自動勾選「我已閱讀並同意規則與注意事項」等核取方塊
+    const allCheckboxes = Array.from(
+      document.querySelectorAll('input[type="checkbox"], [role="checkbox"]')
+    );
+    allCheckboxes.forEach((cb) => {
+      const parentText = (cb.closest('label, div, p, li')?.innerText || '').trim();
+      const isRuleCheckbox = /我已閱讀|同意規則|注意事項|同意並閱讀|服務條款|我同意/i.test(parentText);
+      if (isRuleCheckbox) {
+        if (cb.type === 'checkbox' && !cb.checked && !cb.disabled) {
+          cb.click();
+          handled = true;
+          addLog('📋 自動勾選：我已閱讀並同意規則與注意事項');
+        } else if (cb.getAttribute('aria-checked') === 'false') {
+          cb.click();
+          handled = true;
+          addLog('📋 自動勾選條款核取方塊');
+        }
+      }
     });
+
+    // 2. 點選「我已閱讀並同意」、「同意並繼續」、「我知道了」、「確定」等按鈕或文字按鈕
+    const candidateButtons = Array.from(
+      document.querySelectorAll('button, a, div[role="button"], input[type="button"], span[role="button"]')
+    );
+    const confirmBtn = candidateButtons.find((btn) => {
+      if (btn.disabled || btn.classList.contains('disabled') || btn.getAttribute('aria-disabled') === 'true') return false;
+      const txt = (btn.innerText || btn.value || '').trim();
+      return (
+        /我已閱讀並同意|我同意|我知道了|同意並繼續|繼續訂位|同意|我知道|確定|繼續|OK|Agree/i.test(txt) &&
+        !/取消|不同意|Close/i.test(txt)
+      );
+    });
+
     if (confirmBtn && confirmBtn.offsetParent !== null) {
       confirmBtn.click();
-      addLog('📋 自動確認用餐須知 (House Rules)');
+      addLog(`📋 自動點擊確認須知：${confirmBtn.innerText.trim()}`);
       return true;
     }
-    return false;
+
+    return handled;
   }
 
   // 設定大人與小孩人數
@@ -842,14 +873,24 @@
     if (!window.location.hostname.includes('inline.app')) return;
 
     ensureFloatingPanel();
+    handleHouseRules();
 
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', ensureFloatingPanel);
+      document.addEventListener('DOMContentLoaded', () => {
+        ensureFloatingPanel();
+        handleHouseRules();
+      });
     }
-    window.addEventListener('load', ensureFloatingPanel);
+    window.addEventListener('load', () => {
+      ensureFloatingPanel();
+      handleHouseRules();
+    });
 
-    // 每秒檢查一次，防止 SPA 頁面切換、水合 (Hydration) 或動態渲染將懸浮面板卸載
-    setInterval(ensureFloatingPanel, 1000);
+    // 每 800ms 檢查一次：確保懸浮面板存在，並即時自動勾選同意彈出的用餐須知/注意事項
+    setInterval(() => {
+      ensureFloatingPanel();
+      handleHouseRules();
+    }, 800);
   }
 
   init();
