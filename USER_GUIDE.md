@@ -2,6 +2,10 @@
 
 本手冊詳細說明如何安裝、設定與實戰操作 **Inline 餐廳自動搶位助手 (Inline Booking Sniper)**。本腳本專為 inline.app 訂位系統設計，支援「準時放位開搶 (Opening Drop)」與「釋出撿漏輪詢 (Cancellation Sniping)」雙模式，並具備完整五步全自動流水線與反爬蟲防禦機制。
 
+<p align="center">
+  <img src="./docs/infographic.jpg" alt="Inline 搶位助手全自動指南 Infographic" width="480" />
+</p>
+
 ---
 
 ## 📑 目錄
