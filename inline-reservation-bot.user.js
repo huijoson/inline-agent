@@ -631,7 +631,39 @@
     return null;
   }
 
+  function setReactInputValue(input, val) {
+    if (!input || val === undefined || val === null || val === '') return;
+    const prototype = Object.getPrototypeOf(input);
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+    if (descriptor && descriptor.set) {
+      descriptor.set.call(input, val);
+    } else {
+      input.value = val;
+    }
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function setReactTextareaValue(textarea, val) {
+    if (!textarea || val === undefined || val === null || val === '') return;
+    const prototype = Object.getPrototypeOf(textarea);
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+    if (descriptor && descriptor.set) {
+      descriptor.set.call(textarea, val);
+    } else {
+      textarea.value = val;
+    }
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    textarea.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
   function findSubmitButton() {
+    // 優先匹配 inline 專屬 data-cy="submit"
+    const directSubmit = document.querySelector('button[data-cy="submit"], button[type="submit"].eERBSs');
+    if (directSubmit && !directSubmit.disabled && directSubmit.offsetParent !== null) {
+      return directSubmit;
+    }
+
     const candidateButtons = Array.from(
       document.querySelectorAll('button, input[type="submit"], div[role="button"], a[role="button"]')
     );
@@ -644,50 +676,54 @@
 
   // 表單自動填寫
   function fillReservationForm() {
-    // 姓名
-    const nameInput = document.querySelector('input#name, input[name="name"]');
+    // 姓名 (使用 React 原生 Setter 確保狀態更新)
+    const nameInput = document.querySelector('input#name, input[data-cy="name"], input[name="name"]');
     if (nameInput && config.userName && nameInput.value !== config.userName) {
-      nameInput.value = config.userName;
-      nameInput.dispatchEvent(new Event('input', { bubbles: true }));
-      nameInput.dispatchEvent(new Event('change', { bubbles: true }));
+      setReactInputValue(nameInput, config.userName);
     }
 
-    // 性別稱謂
+    // 性別稱謂 (inline 使用 Radix UI button[role="radio"])
     if (config.userGender === 'male') {
-      const maleRadio = document.querySelector('input#gender-male, input[value="male"], input[value="MR"]');
-      if (maleRadio && !maleRadio.checked) maleRadio.click();
+      const maleRadio = document.querySelector('#gender-male, button#gender-male, input#gender-male');
+      if (maleRadio && (maleRadio.getAttribute('aria-checked') === 'false' || (maleRadio.type === 'radio' && !maleRadio.checked))) {
+        maleRadio.click();
+      }
     } else if (config.userGender === 'female') {
-      const femaleRadio = document.querySelector('input#gender-female, input[value="female"], input[value="MS"]');
-      if (femaleRadio && !femaleRadio.checked) femaleRadio.click();
+      const femaleRadio = document.querySelector('#gender-female, button#gender-female, input#gender-female');
+      if (femaleRadio && (femaleRadio.getAttribute('aria-checked') === 'false' || (femaleRadio.type === 'radio' && !femaleRadio.checked))) {
+        femaleRadio.click();
+      }
     }
 
     // 電話
-    const phoneInput = document.querySelector('input#phone, input[type="tel"], input[name="phone"]');
+    const phoneInput = document.querySelector('input#phone, input[data-cy="phone"], input[type="tel"], input[name="phone"]');
     if (phoneInput && config.userPhone && phoneInput.value !== config.userPhone) {
-      phoneInput.value = config.userPhone;
-      phoneInput.dispatchEvent(new Event('input', { bubbles: true }));
-      phoneInput.dispatchEvent(new Event('change', { bubbles: true }));
+      setReactInputValue(phoneInput, config.userPhone);
     }
 
     // Email
-    const emailInput = document.querySelector('input#email, input[type="email"], input[name="email"]');
+    const emailInput = document.querySelector('input#email, input[data-cy="email"], input[type="email"], input[name="email"]');
     if (emailInput && config.userEmail && emailInput.value !== config.userEmail) {
-      emailInput.value = config.userEmail;
-      emailInput.dispatchEvent(new Event('input', { bubbles: true }));
-      emailInput.dispatchEvent(new Event('change', { bubbles: true }));
+      setReactInputValue(emailInput, config.userEmail);
     }
 
     // 備註
     const noteArea = document.querySelector('textarea, input#note, input[name="note"]');
     if (noteArea && config.bookingNote && noteArea.value !== config.bookingNote) {
-      noteArea.value = config.bookingNote;
-      noteArea.dispatchEvent(new Event('input', { bubbles: true }));
+      setReactTextareaValue(noteArea, config.bookingNote);
     }
 
-    // 勾選所有條款核取方塊
-    const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
-    checkboxes.forEach((cb) => {
-      if (!cb.checked && !cb.disabled) {
+    // 勾選所有條款與保證金政策核取方塊 (含 button[role="checkbox"])
+    const allCheckboxes = Array.from(
+      document.querySelectorAll('input[type="checkbox"], button[role="checkbox"], [role="checkbox"]')
+    );
+    allCheckboxes.forEach((cb) => {
+      // 略過非必要的行銷活動核取
+      if (cb.id === 'marketing-optin') return;
+
+      if (cb.type === 'checkbox') {
+        if (!cb.checked && !cb.disabled) cb.click();
+      } else if (cb.getAttribute('aria-checked') === 'false' || cb.getAttribute('data-state') === 'unchecked') {
         cb.click();
       }
     });
