@@ -45,6 +45,7 @@
     timerId: null,
     pollTimeoutId: null,
     logHistory: [],
+    captchaAlerted: false,
   };
 
   // 讀取/儲存設定
@@ -94,6 +95,43 @@
       });
     } catch (err) {
       console.warn('音效播放失敗', err);
+    }
+  }
+
+  function playAlertSound() {
+    if (!config.soundAlert) return;
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      [880, 440, 880, 440].forEach((freq, index) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(freq, now + index * 0.14);
+        gain.gain.setValueAtTime(0.35, now + index * 0.14);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + index * 0.14 + 0.12);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + index * 0.14);
+        osc.stop(now + index * 0.14 + 0.13);
+      });
+    } catch (e) {}
+  }
+
+  function checkCaptchaAlert() {
+    const isCaptcha =
+      !!document.querySelector('#px-captcha, #px-captcha-wrapper') ||
+      (document.body && /按壓不放以確認您是人類|Press & Hold/i.test(document.body.innerText));
+
+    if (isCaptcha && !state.captchaAlerted) {
+      state.captchaAlerted = true;
+      addLog('🚨 偵測到 PerimeterX 按壓驗證！請立即用滑鼠按住畫面按鈕 3 秒！');
+      playAlertSound();
+      showNotification('🚨 請立即按壓驗證', '畫面出現真人驗證，請按住 3 秒，通過後助手會自動接手！');
+    } else if (!isCaptcha) {
+      state.captchaAlerted = false;
     }
   }
 
@@ -968,23 +1006,27 @@
 
     ensureFloatingPanel();
     handleHouseRules();
+    checkCaptchaAlert();
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => {
         ensureFloatingPanel();
         handleHouseRules();
+        checkCaptchaAlert();
       });
     }
     window.addEventListener('load', () => {
       ensureFloatingPanel();
       handleHouseRules();
+      checkCaptchaAlert();
     });
 
-    // 每 800ms 檢查一次：確保懸浮面板存在，並即時自動勾選同意彈出的用餐須知/注意事項
+    // 每 600ms 檢查一次：確保面板存在、自動勾選同意彈出的用餐須知，並在出現驗證碼時即刻發出警報聲
     setInterval(() => {
       ensureFloatingPanel();
       handleHouseRules();
-    }, 800);
+      checkCaptchaAlert();
+    }, 600);
   }
 
   init();
