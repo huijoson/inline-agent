@@ -6,9 +6,7 @@
 // @author       Antigravity
 // @match        https://inline.app/*
 // @match        https://*.inline.app/*
-// @grant        GM_setValue
-// @grant        GM_getValue
-// @grant        GM_notification
+// @grant        none
 // @run-at       document-idle
 // ==/UserScript==
 
