@@ -859,32 +859,6 @@
 
   const InlineDomAdapter = createInlineDomAdapter();
 
-  // 相容代理層 (Backward Compatibility Delegates)
-  function handleHouseRules() {
-    return InlineDomAdapter.acknowledgeHouseRules();
-  }
-
-  function setPartySize() {
-    InlineDomAdapter.setPartySize(config.adults, config.kids);
-  }
-
-  function selectTargetDate() {
-    return InlineDomAdapter.selectDate(config.targetDate);
-  }
-
-  function attemptPickSlot() {
-    const priorityList = config.prioritySlots.split(',').map((s) => s.trim()).filter(Boolean);
-    return InlineDomAdapter.claimSlot(priorityList);
-  }
-
-  function clickSlotContinueButton() {
-    return InlineDomAdapter.clickSlotContinueButton();
-  }
-
-  function findSubmitButton() {
-    return InlineDomAdapter.findSubmitButton();
-  }
-
   // ==========================================
   // 6. 搶位排程引擎模組 (SnipingEngine)
   // 依據 ADR-0003 透過 ReservationTarget 縫隙驅動開搶與撿漏，絕不直接碰觸 DOM
@@ -1130,7 +1104,7 @@
 
   const SnipingEngine = createSnipingEngine();
 
-  // 頂層調度相容代理 (Top-Level Controller Delegates)
+  // 頂層調度進入點 (Top-Level Controller)
   function startSniper() {
     SnipingEngine.start();
   }
@@ -1139,31 +1113,11 @@
     SnipingEngine.stop();
   }
 
-  function executeSnipeCycle() {
-    SnipingEngine.executeCancellationCycle();
-  }
-
-  function scheduleNextPoll() {
-    SnipingEngine.scheduleNextPoll();
-  }
-
-  function scheduleDropSnipe() {
-    SnipingEngine.scheduleDropSnipe();
-  }
-
-  function triggerDropAction() {
-    SnipingEngine.triggerDropAction();
-  }
-
-  function proceedToContactForm() {
-    SnipingEngine.proceedToContactForm();
-  }
-
   // ==========================================
-  // 6. 初始化進入點
+  // 7. 初始化與面板掛載
   // ==========================================
   function ensureFloatingPanel() {
-    if (!window.location.hostname.includes('inline.app')) return;
+    if (typeof window === 'undefined' || !window.location || !window.location.hostname || !window.location.hostname.includes('inline.app')) return;
     if (document.getElementById('inline-auto-sniper-panel')) return;
     if (!document.body) {
       setTimeout(ensureFloatingPanel, 100);
@@ -1176,26 +1130,26 @@
     if (typeof window === 'undefined' || !window.location || !window.location.hostname || !window.location.hostname.includes('inline.app')) return;
 
     ensureFloatingPanel();
-    handleHouseRules();
+    InlineDomAdapter.acknowledgeHouseRules();
     checkCaptchaAlert();
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => {
         ensureFloatingPanel();
-        handleHouseRules();
+        InlineDomAdapter.acknowledgeHouseRules();
         checkCaptchaAlert();
       });
     }
     window.addEventListener('load', () => {
       ensureFloatingPanel();
-      handleHouseRules();
+      InlineDomAdapter.acknowledgeHouseRules();
       checkCaptchaAlert();
     });
 
     // 每 600ms 檢查一次：確保面板存在、自動勾選同意彈出的用餐須知，並在出現驗證碼時即刻發出警報聲
     setInterval(() => {
       ensureFloatingPanel();
-      handleHouseRules();
+      InlineDomAdapter.acknowledgeHouseRules();
       checkCaptchaAlert();
     }, 600);
   }
