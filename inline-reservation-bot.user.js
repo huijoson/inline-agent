@@ -722,11 +722,10 @@
       // 軟刷新：重新點擊目標日期或重觸發查詢
       const refreshed = selectTargetDate();
       if (!refreshed) {
-        // 若無法軟點擊，微距重新整理
-        location.reload();
-      } else {
-        setTimeout(executeSnipeCycle, 400);
+        // 不進行全頁 reload，改為重新觸發狀態以帶動日曆重新查詢，避免觸發防火牆
+        setPartySize();
       }
+      setTimeout(executeSnipeCycle, 400);
     }, interval);
   }
 
@@ -769,15 +768,8 @@
 
   function triggerDropAction() {
     addLog('⚡ 開搶時間到達！執行毫秒級搶位程序！');
-    // 檢查目標日期是否存在，若不存在則在 T-200ms 刷新
-    const dateSelected = selectTargetDate();
-    if (!dateSelected) {
-      addLog('🔄 目標日期尚未出現在畫面上，執行極速刷新...');
-      location.reload();
-      return;
-    }
 
-    // 進行高頻重試時段抓取
+    // 進行高頻重試時段抓取（絕不執行整頁 location.reload，避免觸發 PerimeterX 防火牆）
     let attempts = 0;
     const dropInterval = setInterval(() => {
       attempts++;
@@ -785,7 +777,7 @@
       setPartySize();
       selectTargetDate();
       const picked = attemptPickSlot();
-      if (picked || attempts >= 25) {
+      if (picked || attempts >= 30) {
         clearInterval(dropInterval);
         if (picked) {
           setTimeout(fillReservationForm, 300);
@@ -794,7 +786,7 @@
           stopSniper();
         }
       }
-    }, 150);
+    }, 120);
   }
 
   function startSniper() {
