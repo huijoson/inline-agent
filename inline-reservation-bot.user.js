@@ -532,6 +532,7 @@
   }
 
   function updateStatusUI(statusText, countdownText, isRunning) {
+    if (typeof document === 'undefined') return;
     const statusEl = document.getElementById('ias-status-text');
     const countdownEl = document.getElementById('ias-countdown');
     const startBtn = document.getElementById('ias-btn-start');
