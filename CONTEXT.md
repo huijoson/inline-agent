@@ -43,3 +43,11 @@ _Avoid_: Fee, payment, guarantee money
 **Submission Policy**:
 The operational rule determining whether the reservation form is submitted autonomously or held for manual confirmation.
 _Avoid_: Submit mode, auto-click rule
+
+**Table Category**:
+The distinct seating arrangement classification configured by the restaurant (e.g., 一般, 板前吧台, 包廂, 戶外桌).
+_Avoid_: Desk, room, seat type
+
+**Seating Preference**:
+The prioritized preference list of table categories specified for automated selection, defaulting to the first available category.
+_Avoid_: Table order, chair choice

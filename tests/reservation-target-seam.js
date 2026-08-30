@@ -31,6 +31,8 @@ function createFakeReservationAdapter(options = {}) {
     partySize: { ...(options.partySize || { adults: 2, kids: 0 }) },
     selectedDate: options.selectedDate || null,
     availableDates: new Set(options.availableDates || []),
+    availableTableTypes: [...(options.availableTableTypes || [])],
+    selectedTableType: null,
     availableSlots: [...(options.availableSlots || [])],
     claimedSlot: null,
     requiresDeposit: options.requiresDeposit ?? false,
@@ -46,6 +48,9 @@ function createFakeReservationAdapter(options = {}) {
     _getCallLog: () => [...state.callLog],
     _setAvailableSlots: (slots) => {
       state.availableSlots = [...slots];
+    },
+    _setAvailableTableTypes: (types) => {
+      state.availableTableTypes = [...types];
     },
     _setHouseRulesActive: (active) => {
       state.houseRulesActive = active;
@@ -76,6 +81,39 @@ function createFakeReservationAdapter(options = {}) {
         return true;
       }
       return false;
+    },
+
+    // 3.1 Select Table Type
+    selectTableType(preferredTypes = []) {
+      state.callLog.push({ method: 'selectTableType', args: { preferredTypes }, timestamp: Date.now() });
+      if (state.availableTableTypes.length === 0) {
+        return null;
+      }
+      const prefs = Array.isArray(preferredTypes)
+        ? preferredTypes.map((s) => s.trim()).filter(Boolean)
+        : String(preferredTypes || '').split(',').map((s) => s.trim()).filter(Boolean);
+
+      if (prefs.length > 0) {
+        const normalize = (s) => String(s || '').toLowerCase().replace(/檯/g, '台').replace(/[（）()、，,\s_-]/g, '');
+        const coreKeywords = ['板前', '吧台', '一般', '包廂', '戶外', '靠窗', '沙發', '高腳', '方桌', '圓桌'];
+
+        for (const pref of prefs) {
+          const normPref = normalize(pref);
+          if (!normPref) continue;
+          const match = state.availableTableTypes.find((t) => {
+            const normT = normalize(t);
+            if (normT.includes(normPref) || normPref.includes(normT)) return true;
+            return coreKeywords.some((kw) => normPref.includes(kw) && normT.includes(kw));
+          });
+          if (match) {
+            state.selectedTableType = match;
+            return match;
+          }
+        }
+      }
+      // Default: select first available
+      state.selectedTableType = state.availableTableTypes[0];
+      return state.selectedTableType;
     },
 
     // 4. Claim Time Slot by Priority List

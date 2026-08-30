@@ -50,6 +50,7 @@ describe('SnipingEngine Orchestration & Seam Integration (Issue #4)', () => {
           assert.ok(methodNames.includes('acknowledgeHouseRules'), 'Must acknowledge house rules via seam');
           assert.ok(methodNames.includes('setPartySize'), 'Must set party size via seam');
           assert.ok(methodNames.includes('selectDate'), 'Must select date via seam');
+          assert.ok(methodNames.includes('selectTableType'), 'Must select table type via seam');
           assert.ok(methodNames.includes('claimSlot'), 'Must claim slot via seam');
 
           assert.equal(adapter._getState().claimedSlot, '19:00');
@@ -89,6 +90,7 @@ describe('SnipingEngine Orchestration & Seam Integration (Issue #4)', () => {
       assert.ok(methods.includes('acknowledgeHouseRules'));
       assert.ok(methods.includes('setPartySize'));
       assert.ok(methods.includes('selectDate'));
+      assert.ok(methods.includes('selectTableType'));
       assert.ok(methods.includes('claimSlot'));
 
       engine.stop();

@@ -57,6 +57,53 @@ describe('ReservationTarget Seam Contract & Invariants', () => {
     });
   });
 
+  describe('Table Type Selection (selectTableType)', () => {
+    it('defaults to the first available table type when preferred list is empty', () => {
+      const adapter = createFakeReservationAdapter({
+        availableTableTypes: ['一般', '板前吧台'],
+      });
+      const selected = adapter.selectTableType([]);
+      assert.equal(selected, '一般');
+      assert.equal(adapter._getState().selectedTableType, '一般');
+    });
+
+    it('selects the preferred table type (e.g. 板前吧台) when present in available types', () => {
+      const adapter = createFakeReservationAdapter({
+        availableTableTypes: ['一般', '板前吧台'],
+      });
+      const selected = adapter.selectTableType(['板前吧台', '一般']);
+      assert.equal(selected, '板前吧台');
+      assert.equal(adapter._getState().selectedTableType, '板前吧台');
+    });
+
+    it('matches reversed table names such as 高雄店 吧台板前 when user preference is 板前吧台', () => {
+      const adapter = createFakeReservationAdapter({
+        availableTableTypes: ['一般', '吧台板前'],
+      });
+      const selected = adapter.selectTableType(['板前吧台']);
+      assert.equal(selected, '吧台板前');
+      assert.equal(adapter._getState().selectedTableType, '吧台板前');
+    });
+
+    it('falls back to first available table type if preferred types are not found', () => {
+      const adapter = createFakeReservationAdapter({
+        availableTableTypes: ['一般', '戶外桌'],
+      });
+      const selected = adapter.selectTableType(['板前吧台']);
+      assert.equal(selected, '一般');
+      assert.equal(adapter._getState().selectedTableType, '一般');
+    });
+
+    it('returns null when no table types are available on the page', () => {
+      const adapter = createFakeReservationAdapter({
+        availableTableTypes: [],
+      });
+      const selected = adapter.selectTableType(['一般']);
+      assert.equal(selected, null);
+      assert.equal(adapter._getState().selectedTableType, null);
+    });
+  });
+
   describe('Priority Slot Sniping (claimSlot)', () => {
     it('claims the highest priority available slot in order', () => {
       const adapter = createFakeReservationAdapter({

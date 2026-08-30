@@ -36,7 +36,12 @@ function createMockElement(tagName = 'div', attrs = {}) {
       if (listeners[evt.type]) listeners[evt.type](evt);
       return true;
     },
-    closest: () => ({ innerText: attrs.parentText || el.innerText }),
+    closest: (sel) => {
+      if (sel === '#inline-auto-sniper-panel') return attrs.inPanel ? { id: 'inline-auto-sniper-panel' } : null;
+      return { innerText: attrs.parentText || el.innerText };
+    },
+    querySelectorAll: () => [],
+    querySelector: () => null,
   };
 
   // Give value getter and setter
@@ -52,6 +57,9 @@ function createMockElement(tagName = 'div', attrs = {}) {
 function createMockDocument(elements = []) {
   return {
     querySelectorAll(selector) {
+      if (selector.includes('table-tag') || selector.includes('data-cy') || selector.includes('data-testid')) {
+        return elements.filter((e) => (e.getAttribute && (e.getAttribute('data-cy')?.includes('table-tag') || e.getAttribute('data-testid'))) || e.id === 'table-tag-selector' || e.tagName === 'BUTTON');
+      }
       if (selector.includes('checkbox')) {
         return elements.filter((e) => e.type === 'checkbox' || e.getAttribute('role') === 'checkbox');
       }
@@ -76,14 +84,20 @@ function createMockDocument(elements = []) {
       if (selector.includes('submit')) {
         return elements.find((e) => (e.innerText && /完成預訂|確認/i.test(e.innerText)) || e.id === 'submit-btn') || null;
       }
+      if (selector.includes('familyName')) {
+        return elements.find((e) => e.id === 'familyName' || e.name === 'familyName' || e.getAttribute('data-cy') === 'familyName') || null;
+      }
+      if (selector.includes('givenName')) {
+        return elements.find((e) => e.id === 'givenName' || e.name === 'givenName' || e.getAttribute('data-cy') === 'givenName') || null;
+      }
       if (selector.includes('phone')) {
-        return elements.find((e) => e.id === 'phone' || e.name === 'phone') || null;
+        return elements.find((e) => e.id === 'phone' || e.name === 'phone' || e.type === 'tel') || null;
       }
       if (selector.includes('email')) {
-        return elements.find((e) => e.id === 'email' || e.name === 'email') || null;
+        return elements.find((e) => e.id === 'email' || e.name === 'email' || e.type === 'email') || null;
       }
       if (selector.includes('name')) {
-        return elements.find((e) => e.id === 'name' || e.name === 'name') || null;
+        return elements.find((e) => e.id === 'name' || e.name === 'name' || e.getAttribute('data-cy') === 'name') || null;
       }
       return null;
     },
@@ -165,6 +179,90 @@ describe('InlineDomAdapter Unit Tests (Issue #3)', () => {
     });
   });
 
+  describe('selectTableType()', () => {
+    it('defaults to selecting the first available table type when no preference is provided', () => {
+      let clickedTag = null;
+      const tagGeneral = createMockElement('button', {
+        'data-cy': 'table-tag--OuzJIKI7Hef82q8GpXM',
+        'data-testid': '-OuzJIKI7Hef82q8GpXM',
+        innerText: '一般',
+      });
+      tagGeneral.addEventListener('click', () => {
+        clickedTag = '一般';
+      });
+      const tagBar = createMockElement('button', {
+        'data-cy': 'table-tag--OuuNua-LxXCiiJxkAmW',
+        'data-testid': '-OuuNua-LxXCiiJxkAmW',
+        innerText: '板前吧台',
+      });
+      tagBar.addEventListener('click', () => {
+        clickedTag = '板前吧台';
+      });
+
+      const doc = createMockDocument([tagGeneral, tagBar]);
+      const adapter = createInlineDomAdapter({ document: doc, logger: () => {} });
+
+      const selected = adapter.selectTableType([]);
+      assert.equal(selected, '一般');
+      assert.equal(clickedTag, '一般');
+    });
+
+    it('selects preferred table type (e.g. 板前吧台) when matched', () => {
+      let clickedTag = null;
+      const tagGeneral = createMockElement('button', {
+        'data-cy': 'table-tag-general',
+        innerText: '一般',
+      });
+      tagGeneral.addEventListener('click', () => {
+        clickedTag = '一般';
+      });
+      const tagBar = createMockElement('button', {
+        'data-cy': 'table-tag-bar',
+        innerText: '板前吧台',
+      });
+      tagBar.addEventListener('click', () => {
+        clickedTag = '板前吧台';
+      });
+
+      const doc = createMockDocument([tagGeneral, tagBar]);
+      const adapter = createInlineDomAdapter({ document: doc, logger: () => {} });
+
+      const selected = adapter.selectTableType(['板前吧台']);
+      assert.equal(selected, '板前吧台');
+      assert.equal(clickedTag, '板前吧台');
+    });
+
+    it('matches reversed table names such as 高雄店 吧台板前 when user inputs 板前吧台', () => {
+      let clickedTag = null;
+      const tagGeneral = createMockElement('button', {
+        'data-cy': 'table-tag--Ouq8xpdoxxy-HgR9Ldj',
+        innerText: '一般',
+      });
+      const tagBarReversed = createMockElement('button', {
+        'data-cy': 'table-tag--OuqAmoACDEpncqcC2W0',
+        innerText: '吧台板前', // 高雄漢神店的顛倒名稱
+      });
+      tagBarReversed.addEventListener('click', () => {
+        clickedTag = '吧台板前';
+      });
+
+      const doc = createMockDocument([tagGeneral, tagBarReversed]);
+      const adapter = createInlineDomAdapter({ document: doc, logger: () => {} });
+
+      const selected = adapter.selectTableType(['板前吧台']);
+      assert.equal(selected, '吧台板前');
+      assert.equal(clickedTag, '吧台板前');
+    });
+
+    it('returns null when no table selector exists on the page', () => {
+      const doc = createMockDocument([]);
+      const adapter = createInlineDomAdapter({ document: doc, logger: () => {} });
+
+      const selected = adapter.selectTableType([]);
+      assert.equal(selected, null);
+    });
+  });
+
   describe('claimSlot() with DOM button fixtures', () => {
     it('clicks the available slot button matching priority list', () => {
       let clickedSlot = null;
@@ -218,6 +316,37 @@ describe('InlineDomAdapter Unit Tests (Issue #3)', () => {
       assert.equal(result.status, 'CONFIRMED');
       assert.equal(nameInput.value, '王小明');
       assert.equal(phoneInput.value, '0912345678');
+      assert.equal(submitted, true);
+    });
+
+    it('populates familyName and givenName separately when customerNameFields is 2 (e.g. Island Buffet)', async () => {
+      const familyNameInput = createMockElement('input', { id: 'familyName', 'data-cy': 'familyName', value: '' });
+      const givenNameInput = createMockElement('input', { id: 'givenName', 'data-cy': 'givenName', value: '' });
+      const phoneInput = createMockElement('input', { id: 'phone', value: '' });
+      const emailInput = createMockElement('input', { id: 'email', value: '' });
+      const submitBtn = createMockElement('button', {
+        id: 'submit-btn',
+        innerText: '確認訂位',
+      });
+
+      let submitted = false;
+      submitBtn.addEventListener('click', () => {
+        submitted = true;
+      });
+
+      const doc = createMockDocument([familyNameInput, givenNameInput, phoneInput, emailInput, submitBtn]);
+      const adapter = createInlineDomAdapter({ document: doc, logger: () => {} });
+
+      const result = await adapter.submitReservation({
+        name: '王小明',
+        phone: '0912345678',
+        email: 'wang@example.com',
+      }, { autoSubmit: true });
+
+      assert.equal(result.success, true);
+      assert.equal(result.status, 'CONFIRMED');
+      assert.equal(familyNameInput.value, '王');
+      assert.equal(givenNameInput.value, '小明');
       assert.equal(submitted, true);
     });
   });

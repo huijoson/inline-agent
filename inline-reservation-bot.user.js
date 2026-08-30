@@ -23,6 +23,7 @@
     targetDate: '', // YYYY-MM-DD
     adults: '2',
     kids: '0',
+    tablePreference: '', // 留空為預設選第一個可用桌型，亦可設定 '一般, 板前吧台' 等
     prioritySlots: '18:30, 19:00, 19:30, 18:00, 20:00', // 逗點分隔優先時段
     dropTime: '00:00:00', // 開搶時間 (HH:mm:ss)
     leadTimeMs: 180, // 開搶前提前觸發毫秒數
@@ -406,6 +407,11 @@
           </div>
 
           <div class="ias-group">
+            <label>桌型偏好 (留空則自動選首個可用桌型，亦可填: 一般, 板前吧台)</label>
+            <input type="text" id="ias-table-preference" value="${config.tablePreference || ''}" placeholder="不拘 (預設自動秒選第一個可用桌型)">
+          </div>
+
+          <div class="ias-group">
             <label>優先時段清單 (以逗點隔開，越前越優先)</label>
             <input type="text" id="ias-priority-slots" value="${config.prioritySlots}" placeholder="19:00, 19:30, 18:30">
           </div>
@@ -521,6 +527,7 @@
     config.dropTime = document.getElementById('ias-drop-time').value.trim();
     config.adults = document.getElementById('ias-adults').value;
     config.kids = document.getElementById('ias-kids').value;
+    config.tablePreference = (document.getElementById('ias-table-preference')?.value || '').trim();
     config.prioritySlots = document.getElementById('ias-priority-slots').value;
     config.userName = document.getElementById('ias-user-name').value.trim();
     config.userGender = document.getElementById('ias-user-gender').value;
@@ -560,22 +567,90 @@
       return el.offsetParent !== null;
     }
 
+    function splitPersonName(fullName) {
+      const name = String(fullName || '').trim();
+      if (!name) return { familyName: '', givenName: '' };
+
+      if (name.includes(' ')) {
+        const parts = name.split(/\s+/);
+        if (parts.length === 2) {
+          if (/^[a-zA-Z]+$/.test(parts[0]) && /^[a-zA-Z]+$/.test(parts[1])) {
+            return { familyName: parts[1], givenName: parts[0] };
+          }
+          return { familyName: parts[0], givenName: parts[1] };
+        }
+      }
+
+      const compoundSurnames = [
+        '歐陽', '司馬', '上官', '諸葛', '夏侯', '東方', '皇甫', '尉遲', '公孫',
+        '令狐', '端木', '司徒', '南宮', '萬俟', '聞人', '慕容', '司空'
+      ];
+      for (const cs of compoundSurnames) {
+        if (name.startsWith(cs) && name.length > 2) {
+          return {
+            familyName: cs,
+            givenName: name.slice(cs.length),
+          };
+        }
+      }
+
+      if (name.length >= 2) {
+        return {
+          familyName: name.slice(0, 1),
+          givenName: name.slice(1),
+        };
+      }
+
+      return {
+        familyName: name,
+        givenName: name,
+      };
+    }
+
     function setReactValue(element, val) {
       if (!element || val === undefined || val === null || val === '') return;
       try {
-        const prototype = Object.getPrototypeOf(element);
-        const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+        const isTextarea = element.tagName === 'TEXTAREA';
+        const win = (typeof window !== 'undefined' ? window : null);
+        const proto = isTextarea
+          ? (win && win.HTMLTextAreaElement ? win.HTMLTextAreaElement.prototype : Object.getPrototypeOf(element))
+          : (win && win.HTMLInputElement ? win.HTMLInputElement.prototype : Object.getPrototypeOf(element));
+        const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+
+        // 1. 重設 React 的內部 ValueTracker，以防 React 16/17/18 忽略 input 事件
+        const tracker = element._valueTracker;
+        if (tracker) {
+          tracker.setValue('');
+        }
+
+        // 2. 透過原生原型鏈 descriptor 設定值
         if (descriptor && descriptor.set) {
           descriptor.set.call(element, val);
         } else {
           element.value = val;
         }
+
+        // 3. 依序觸發 input, change, blur 事件（支援 bubbles 與 composed）
         if (typeof Event === 'function') {
-          element.dispatchEvent(new Event('input', { bubbles: true }));
-          element.dispatchEvent(new Event('change', { bubbles: true }));
+          const inputEvent = typeof InputEvent === 'function'
+            ? new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: String(val) })
+            : new Event('input', { bubbles: true, composed: true });
+          element.dispatchEvent(inputEvent);
+
+          const changeEvent = new Event('change', { bubbles: true, composed: true });
+          element.dispatchEvent(changeEvent);
+
+          const blurEvent = new Event('blur', { bubbles: true, composed: true });
+          element.dispatchEvent(blurEvent);
         }
       } catch (e) {
-        element.value = val;
+        try {
+          element.value = val;
+          if (typeof Event === 'function') {
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        } catch (err) {}
       }
     }
 
@@ -681,16 +756,88 @@
         return false;
       },
 
+      selectTableType(preferredTypes = []) {
+        if (!doc) return null;
+        try {
+          const tableButtons = Array.from(
+            doc.querySelectorAll('button[data-cy^="table-tag-"], [data-cy="table-tag-selector"] button, #table-tag-selector button, #table-tag-selector [role="button"], button[data-testid]')
+          ).filter((btn) => {
+            if (!isElementClickable(btn)) return false;
+            const txt = (btn.innerText || btn.value || '').trim();
+            if (!txt || /\b\d{1,2}:\d{2}\b/.test(txt)) return false;
+            const isFull = (btn.classList && (btn.classList.contains('full') || btn.classList.contains('disabled'))) ||
+              btn.disabled || btn.getAttribute('aria-disabled') === 'true' || txt.includes('滿') || txt.includes('full');
+            return !isFull;
+          });
+
+          if (tableButtons.length === 0) return null;
+
+          const prefs = Array.isArray(preferredTypes)
+            ? preferredTypes.map((s) => s.trim()).filter(Boolean)
+            : String(preferredTypes || '').split(',').map((s) => s.trim()).filter(Boolean);
+
+          // 1. 優先比對指定桌型清單 (支援模糊語意與字序相容，例如「板前吧台」可相容「吧台板前」或「板前座位（吧台座位）」)
+          if (prefs.length > 0) {
+            const normalize = (s) => String(s || '').toLowerCase().replace(/檯/g, '台').replace(/[（）()、，,\s_-]/g, '');
+            const coreKeywords = ['板前', '吧台', '一般', '包廂', '戶外', '靠窗', '沙發', '高腳', '方桌', '圓桌'];
+
+            for (const pref of prefs) {
+              const normPref = normalize(pref);
+              if (!normPref) continue;
+
+              const match = tableButtons.find((btn) => {
+                const txt = (btn.innerText || btn.value || '').trim();
+                const testId = (btn.getAttribute && btn.getAttribute('data-testid')) || '';
+                const cy = (btn.getAttribute && btn.getAttribute('data-cy')) || '';
+                const normTxt = normalize(txt);
+                const normTestId = normalize(testId);
+                const normCy = normalize(cy);
+
+                // 直接/雙向子字串包含
+                if (normTxt.includes(normPref) || normPref.includes(normTxt)) return true;
+                if (normTestId.includes(normPref) || normCy.includes(normPref)) return true;
+
+                // 核心關鍵字交集匹配 (解決 高雄「吧台板前」 vs 桃園「板前吧台」等倒裝字序問題)
+                const hasSharedKeyword = coreKeywords.some((kw) => normPref.includes(kw) && normTxt.includes(kw));
+                return hasSharedKeyword;
+              });
+
+              if (match) {
+                const selectedName = (match.innerText || match.value || pref).trim();
+                match.click();
+                log(`🪑 成功鎖定用餐桌型: 【${selectedName}】`);
+                return selectedName;
+              }
+            }
+          }
+
+          // 2. 預設策略：自動選取首個可用桌型
+          const firstAvailable = tableButtons[0];
+          if (firstAvailable) {
+            const selectedName = (firstAvailable.innerText || firstAvailable.value || '預設桌型').trim();
+            firstAvailable.click();
+            log(`🪑 自動選取首個可用桌型: 【${selectedName}】`);
+            return selectedName;
+          }
+        } catch (e) {
+          console.warn('[InlineSniper] selectTableType 異常', e);
+        }
+        return null;
+      },
+
       claimSlot(priorityList) {
         if (!doc || !priorityList) return null;
         try {
-          const slotButtons = Array.from(doc.querySelectorAll('button.time-slot, button[data-time], button'));
+          const slotButtons = Array.from(
+            doc.querySelectorAll('button.time-slot, button[data-time], [data-cy="dining-period-slots"] button, [data-cy="dining-period-slots"] [role="button"], [data-cy="dining-period-slots"] > div, button, div[role="button"]')
+          );
           const availableSlots = slotButtons.filter((btn) => {
+            if (btn.closest && btn.closest('#inline-auto-sniper-panel')) return false;
             const txt = (btn.innerText || '').trim();
             const isTimeFormat = /\b\d{1,2}:\d{2}\b/.test(txt);
             if (!isTimeFormat) return false;
             const isFull = (btn.classList && (btn.classList.contains('full') || btn.classList.contains('disabled'))) ||
-              btn.disabled || txt.includes('滿') || txt.includes('full');
+              btn.disabled || (btn.getAttribute && btn.getAttribute('aria-disabled') === 'true') || txt.includes('滿') || txt.includes('full') || txt.includes('候位') || txt.includes('Waitlist');
             return !isFull && isElementClickable(btn);
           });
 
@@ -730,7 +877,19 @@
 
       isContactFormPage() {
         if (!doc) return false;
-        return !!(doc.getElementById('contact-form') || doc.querySelector('input#name, input#phone, input[data-cy="name"]'));
+        // 若畫面上存在可見的日期或時段選擇器，表示還在選位階段，絕不能誤判為已進入聯絡表單
+        const slotPickerEl = doc.querySelector('[data-cy="dining-period-slots"], #date-picker, [data-date]');
+        if (slotPickerEl && isElementClickable(slotPickerEl)) {
+          return false;
+        }
+
+        const phoneInput = doc.querySelector('input#phone, input[data-cy="phone"], input[type="tel"]');
+        const nameInput = doc.querySelector('input#name, input#familyName, input[data-cy="name"], input[data-cy="familyName"]');
+        return !!(
+          doc.getElementById('contact-form') ||
+          (phoneInput && isElementClickable(phoneInput)) ||
+          (nameInput && isElementClickable(nameInput))
+        );
       },
 
       hasCreditCardDeposit() {
@@ -750,19 +909,54 @@
 
       fillGuestDetails(guest) {
         if (!doc || !guest) return;
-        // 姓名
-        const nameInput = doc.querySelector('input#name, input[data-cy="name"], input[name="name"]');
+
+        // 姓名拆解 (自動支援單一欄位 name 與雙欄位 姓 familyName / 名 givenName)
+        const nameParts = splitPersonName(guest.name);
+
+        // 1. 雙欄位容器 (#names, #nameFields, [data-cy="names"]) 內部 input 配對填入
+        const nameContainer = doc.querySelector('#names, #nameFields, [data-cy="names"], [data-cy="nameFields"]');
+        if (nameContainer && typeof nameContainer.querySelectorAll === 'function') {
+          const containerInputs = Array.from(nameContainer.querySelectorAll('input'));
+          if (containerInputs.length >= 2) {
+            const input0 = containerInputs[0];
+            const input1 = containerInputs[1];
+            const is0Given = (input0.id === 'givenName' || (input0.getAttribute && input0.getAttribute('data-cy') === 'givenName') || (input0.placeholder && input0.placeholder.includes('名')));
+            if (is0Given) {
+              setReactValue(input0, nameParts.givenName);
+              setReactValue(input1, nameParts.familyName);
+            } else {
+              setReactValue(input0, nameParts.familyName);
+              setReactValue(input1, nameParts.givenName);
+            }
+          }
+        }
+
+        // 2. 雙欄位姓名：姓氏 (customerNameFields = 2 或 4)
+        const familyNameInput = doc.querySelector('input#familyName, input[data-cy="familyName"], input[name="familyName"], input[autocomplete="family-name"], input[placeholder*="姓"]');
+        if (familyNameInput && nameParts.familyName && familyNameInput.value !== nameParts.familyName) {
+          setReactValue(familyNameInput, nameParts.familyName);
+        }
+
+        // 3. 雙欄位姓名：名字
+        const givenNameInput = doc.querySelector('input#givenName, input[data-cy="givenName"], input[name="givenName"], input[autocomplete="given-name"], input[placeholder*="名"]');
+        if (givenNameInput && nameParts.givenName && givenNameInput.value !== nameParts.givenName) {
+          setReactValue(givenNameInput, nameParts.givenName);
+        }
+
+        // 4. 單一全名欄位 (customerNameFields = 1)
+        const nameInput = doc.querySelector('input#name, input[data-cy="name"], input[name="name"], input[autocomplete="name"]');
         if (nameInput && guest.name && nameInput.value !== guest.name) {
           setReactValue(nameInput, guest.name);
         }
+
         // 性別稱謂
         if (guest.gender === 'male') {
-          const maleRadio = doc.querySelector('#gender-male, button#gender-male, input#gender-male');
+          const maleRadio = doc.querySelector('#gender-male, button#gender-male, input#gender-male, [data-cy="gender-male"], [data-testid="gender-male"]');
           if (maleRadio && ((maleRadio.getAttribute && maleRadio.getAttribute('aria-checked') === 'false') || (maleRadio.type === 'radio' && !maleRadio.checked))) {
             maleRadio.click();
           }
         } else if (guest.gender === 'female') {
-          const femaleRadio = doc.querySelector('#gender-female, button#gender-female, input#gender-female');
+          const femaleRadio = doc.querySelector('#gender-female, button#gender-female, input#gender-female, [data-cy="gender-female"], [data-testid="gender-female"]');
           if (femaleRadio && ((femaleRadio.getAttribute && femaleRadio.getAttribute('aria-checked') === 'false') || (femaleRadio.type === 'radio' && !femaleRadio.checked))) {
             femaleRadio.click();
           }
@@ -782,12 +976,11 @@
         if (noteArea && guest.note && noteArea.value !== guest.note) {
           setReactValue(noteArea, guest.note);
         }
-        // 條款核取方塊
+        // 條款核取方塊與各項勾選（含隱私權、服務條款與行銷優惠同意）
         const allCheckboxes = Array.from(
           doc.querySelectorAll('input[type="checkbox"], button[role="checkbox"], [role="checkbox"]')
         );
         allCheckboxes.forEach((cb) => {
-          if (cb.id === 'marketing-optin') return;
           if (cb.type === 'checkbox') {
             if (!cb.checked && !cb.disabled) cb.click();
           } else if (cb.getAttribute && (cb.getAttribute('aria-checked') === 'false' || cb.getAttribute('data-state') === 'unchecked')) {
@@ -842,6 +1035,9 @@
             let attempts = 0;
             const interval = setInterval(() => {
               attempts++;
+              // 每次輪詢確保個資填寫與勾選皆完整生效
+              this.fillGuestDetails(guestDetails);
+
               const submitBtn = this.findSubmitButton();
               if (submitBtn) {
                 clearInterval(interval);
@@ -949,6 +1145,7 @@
         phone: cfg.userPhone,
         email: cfg.userEmail,
         note: cfg.bookingNote,
+        tablePreference: cfg.tablePreference,
       }, {
         autoSubmit: cfg.autoSubmitFree,
       }).then((res) => {
@@ -979,6 +1176,7 @@
       adapter.setPartySize(cfg.adults, cfg.kids);
 
       adapter.selectDate(cfg.targetDate);
+      adapter.selectTableType(parsePrioritySlots(cfg.tablePreference));
       const priorityList = parsePrioritySlots(cfg.prioritySlots);
       const picked = adapter.claimSlot(priorityList);
 
@@ -1002,6 +1200,7 @@
         if (!refreshed) {
           adapter.setPartySize(cfg.adults, cfg.kids);
         }
+        adapter.selectTableType(parsePrioritySlots(cfg.tablePreference));
         setTimeout(executeCancellationCycle, 400);
       }, interval);
     }
@@ -1051,6 +1250,7 @@
         adapter.acknowledgeHouseRules();
         adapter.setPartySize(cfg.adults, cfg.kids);
         adapter.selectDate(cfg.targetDate);
+        adapter.selectTableType(parsePrioritySlots(cfg.tablePreference));
         const picked = adapter.claimSlot(priorityList);
 
         if (picked) {
