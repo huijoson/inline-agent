@@ -459,7 +459,8 @@
           </div>
 
           <div class="ias-btn-row">
-            <button class="ias-btn ias-btn-save" id="ias-btn-save">💾 儲存設定</button>
+            <button class="ias-btn ias-btn-save" id="ias-btn-save" title="儲存當前搶位偏好設定">💾 儲存</button>
+            <button class="ias-btn" id="ias-btn-clear" title="清除網站 LocalStorage、SessionStorage 與瀏覽器快取" style="background: #64748b; color: #fff;">🧹 清除快取</button>
             <button class="ias-btn ias-btn-start" id="ias-btn-start">🚀 啟動搶位</button>
             <button class="ias-btn ias-btn-stop" id="ias-btn-stop" style="display: none;">⏹️ 停止</button>
           </div>
@@ -486,6 +487,7 @@
     const mainCard = document.getElementById('ias-main-card');
     const closeBtn = document.getElementById('ias-close-btn');
     const saveBtn = document.getElementById('ias-btn-save');
+    const clearBtn = document.getElementById('ias-btn-clear');
     const startBtn = document.getElementById('ias-btn-start');
     const stopBtn = document.getElementById('ias-btn-stop');
 
@@ -505,6 +507,37 @@
       saveConfig(config);
       addLog('✅ 設定已儲存至瀏覽器');
     });
+
+    if (clearBtn) {
+      clearBtn.addEventListener('click', async () => {
+        const savedConfig = loadConfig();
+        try {
+          if (typeof sessionStorage !== 'undefined') {
+            sessionStorage.clear();
+          }
+          if (typeof localStorage !== 'undefined') {
+            localStorage.clear();
+            saveConfig(savedConfig);
+          }
+          if (typeof caches !== 'undefined') {
+            const keys = await caches.keys();
+            await Promise.all(keys.map((k) => caches.delete(k)));
+          }
+          if (typeof indexedDB !== 'undefined' && indexedDB.databases) {
+            try {
+              const dbs = await indexedDB.databases();
+              dbs.forEach((db) => {
+                if (db.name) indexedDB.deleteDatabase(db.name);
+              });
+            } catch (e) {}
+          }
+          addLog('🧹 已成功清空 inline 網站快取與 Session 記錄！（搶位設定已自動保留）');
+          alert('【快取清除成功】\n已成功清除該 inline 網站所有 LocalStorage、SessionStorage 與快取數據！\n\n（您的搶位設定已安全保留）');
+        } catch (err) {
+          addLog(`⚠️ 清除快取時發生異常: ${err?.message || err}`);
+        }
+      });
+    }
 
     startBtn.addEventListener('click', () => {
       readInputsToConfig();
@@ -746,11 +779,36 @@
         if (!doc || !targetDate) return true;
         try {
           const targetDateFormatted = targetDate.replace(/-/g, '');
-          const dayElements = Array.from(doc.querySelectorAll('[data-date], button, div[role="button"]'));
-          const matchDateEl = dayElements.find((el) => {
-            const dataDate = (el.getAttribute && el.getAttribute('data-date')) || '';
-            return dataDate === targetDate || dataDate.replace(/-/g, '') === targetDateFormatted;
-          });
+
+          const findDateEl = () => {
+            const dayElements = Array.from(doc.querySelectorAll('[data-date], button[data-date], div[data-date], button, div[role="button"]'));
+            return dayElements.find((el) => {
+              const dataDate = (el.getAttribute && el.getAttribute('data-date')) || '';
+              return dataDate === targetDate || dataDate.replace(/-/g, '') === targetDateFormatted;
+            });
+          };
+
+          let matchDateEl = findDateEl();
+
+          // 若目前畫面上尚未出現該目標日期（例如為跨月份日期），自動尋找並點擊日曆「下一頁/下個月」按鈕
+          if (!matchDateEl) {
+            const nextBtns = Array.from(
+              doc.querySelectorAll('#calendar-picker button, [data-cy="calendar-picker"] button, button[aria-label*="next" i], button[aria-label*="Next" i], [aria-label*="下個月"], [data-cy*="next-month"]')
+            );
+            const nextBtn = nextBtns.find((btn) => {
+              const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+              const txt = (btn.innerText || '').toLowerCase();
+              return aria.includes('next') || aria.includes('下') || txt.includes('>') || txt.includes('下') || btn.querySelector('svg');
+            }) || nextBtns[nextBtns.length - 1];
+
+            if (nextBtn && isElementClickable(nextBtn)) {
+              for (let i = 0; i < 4; i++) {
+                nextBtn.click();
+                matchDateEl = findDateEl();
+                if (matchDateEl) break;
+              }
+            }
+          }
 
           if (matchDateEl && isElementClickable(matchDateEl)) {
             matchDateEl.click();
@@ -1182,7 +1240,13 @@
       const cfg = configProvider();
       adapter.setPartySize(cfg.adults, cfg.kids);
 
-      adapter.selectDate(cfg.targetDate);
+      const dateSelected = adapter.selectDate(cfg.targetDate);
+      if (!dateSelected) {
+        logger(`⏳ 目標日期 【${cfg.targetDate}】 尚未在日曆開放選取，將於下次輪詢時重試...`);
+        scheduleNextPoll();
+        return;
+      }
+
       adapter.selectTableType(parsePrioritySlots(cfg.tablePreference));
       const priorityList = parsePrioritySlots(cfg.prioritySlots);
       const picked = adapter.claimSlot(priorityList);
@@ -1256,7 +1320,24 @@
         attempts++;
         adapter.acknowledgeHouseRules();
         adapter.setPartySize(cfg.adults, cfg.kids);
-        adapter.selectDate(cfg.targetDate);
+
+        const dateSelected = adapter.selectDate(cfg.targetDate);
+        if (!dateSelected) {
+          if (attempts === 1) {
+            logger(`⚠️ 目標日期 【${cfg.targetDate}】 尚未在日曆開放，等待放位刷出...`);
+          }
+          if (attempts >= 30) {
+            if (dropIntervalId) {
+              clearInterval(dropIntervalId);
+              dropIntervalId = null;
+            }
+            logger(`❌ 搶位結束：目標日期 【${cfg.targetDate}】 尚未開放選取`);
+            stop();
+            return false;
+          }
+          return false;
+        }
+
         adapter.selectTableType(parsePrioritySlots(cfg.tablePreference));
         const picked = adapter.claimSlot(priorityList);
 
