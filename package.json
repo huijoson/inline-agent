@@ -1,0 +1,19 @@
+{
+  "name": "inline-booking-sniper",
+  "version": "2.1.0",
+  "description": "High-performance automated reservation sniper for inline.app",
+  "main": "inline-reservation-bot.user.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [
+    "inline",
+    "reservation",
+    "bot",
+    "tampermonkey",
+    "userscript",
+    "sniper"
+  ],
+  "author": "huijoson",
+  "license": "MIT"
+}
