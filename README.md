@@ -1,6 +1,6 @@
 # Inline 餐廳自動搶位助手 (Inline Booking Sniper)
 
-專為 **inline.app** 訂位平台打造的高效能、免受反爬蟲阻擋的瀏覽器自動搶位助手。採用 Tampermonkey (油猴) 腳本架構，直接在您本機已登入的 Google Chrome 中運作，避開 PerimeterX 機器人防護，支援**準時放位開搶 (Opening Drop)** 與 **釋出撿漏輪詢 (Cancellation Sniping)** 雙模式。
+專為 **inline.app** 訂位平台打造的高效能、免受反爬蟲阻擋的瀏覽器自動搶位助手。**無需安裝任何擴充套件（免 Tampermonkey）**，直接於本機已登入的 Google Chrome / Edge 等瀏覽器 Console（主控台）貼上一鍵運行，避開 PerimeterX 機器人防護，支援**準時放位開搶 (Opening Drop)** 與 **釋出撿漏輪詢 (Cancellation Sniping)** 雙模式。
 
 <p align="center">
   <img src="./docs/infographic.jpg" alt="Inline 搶位助手全自動指南 Infographic" width="480" />
@@ -10,6 +10,7 @@
 
 ## 🌟 核心特色
 
+- ⚡ **零安裝極速運行**：免裝油猴擴充插件，直接在瀏覽器 Console 貼上即可秒速啟動，隨開隨用。
 - 🛡️ **原生環境規避反爬蟲**：直接於本機已登入的 Chrome 頁面中運作，避開 `px-captcha` 機器人阻擋與驗證碼風控。
 - ⏱️ **伺服器精準對時**：動態取得 Inline 伺服器時間計算真實偏差值（Clock Offset），支援毫秒級（T-180ms）放位倒數精準觸發。
 - ⚡ **雙模式搶位架構**：
@@ -25,32 +26,28 @@
   - **條款自動勾選**：自動勾選用餐須知、inline 服務條款、隱私權政策與店家行銷優惠同意。
 - 🔒 **保證金安全防呆 (Deposit Policy Guard)**：若餐廳需預授權信用卡訂金，腳本會自動鎖定時段並暫停自動送出，響起警報由人工確認輸入卡號，防止誤扣款。
 - 🔔 **雙重成功提醒**：Web Audio API 慶祝提示音 + 瀏覽器系統級桌面通知（Notification API）。
-- 🎛️ **懸浮控制面板**：頁面右下角常駐精美控制台，支援即時參數設定、本機儲存（LocalStorage）與即時日誌監控。
-- 🧪 **自動化測試覆蓋**：內建 41 項單元測試與契約測試（`node --test`），確保核心邏輯穩健可靠。
+- 🎛️ **懸浮控制面板**：貼上執行後面板自動展開，支援即時參數設定、本機儲存（LocalStorage）與即時日誌監控。
+- 🧪 **自動化測試覆蓋**：內建 41 項單元測試與契約測試（`npm test`），確保核心邏輯穩健可靠。
 
 ---
 
-## 🚀 快速安裝與使用步驟
+## 🚀 3 秒極速使用步驟 (Zero-Install)
 
-### 第一步：安裝 Tampermonkey 擴充功能並啟用開發人員模式
-1. 前往 [Chrome 線上應用程式商店 - Tampermonkey](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo) 點擊「加到 Chrome」完成安裝。
-2. **⚠️ 關鍵步驟（Chrome Manifest V3 必做）**：
-   - 在網址列輸入 `chrome://extensions` 並按下 Enter。
-   - 將右上角的「**開發人員模式 (Developer mode)**」切換為**開啟**（否則 Chrome 會禁止 Tampermonkey 執行任何使用者腳本）。
+### 步驟一：開啟目標餐廳訂位頁面
+1. 使用 Chrome / Edge 等瀏覽器開啟您想預約的**店家專屬訂位頁面**（網址開頭需為 `https://inline.app/booking/...`）。
+> [!NOTE]
+> 請勿留在 `dining.inline.app/.../discover/...` 餐廳目錄總覽頁，需點進餐廳卡片的「**訂位 ↗**」專屬頁面。
 
-### 第二步：載入搶位腳本
-1. 點擊 Chrome 工具列的 Tampermonkey 圖示，選擇「**新增腳本**」。
-2. 將本專案中的 [`inline-reservation-bot.user.js`](./inline-reservation-bot.user.js) 內容完整複製貼入編輯器中。
-3. 按快捷鍵 `Ctrl + S` (Mac: `Cmd + S`) 儲存腳本。
+### 步驟二：打開開發者工具 Console 貼上執行
+1. 在訂位頁面按下鍵盤快捷鍵開啟「開發者工具」：
+   - **Windows / Linux**：按 `F12` 或 `Ctrl + Shift + I`
+   - **Mac**：按 `Cmd + Option + I`
+2. 切換到頂部的 **Console (主控台)** 標籤頁。
+3. 複製 [`inline-reservation-bot.user.js`](./inline-reservation-bot.user.js) 整段代碼，直接**貼上到 Console 中並按下 Enter**。
+4. 畫面上將立即跳出「**⚡ Inline 搶位助手**」控制台！
 
-### 第三步：開啟目標餐廳訂位頁面
-> [!IMPORTANT]
-> - **探索/目錄頁面**（例如 `https://dining.inline.app/zh-tw/discover/...`）是餐廳總覽，**尚未進入任何一家店的訂位系統**。
-> - 請點選您想預約的餐廳右側「**訂位 &#8599;**」按鈕，進入真正的**店家訂位頁面**（網址開頭為 `https://inline.app/booking/...`）。
-> - 頁面右下角會常駐「**⚡ Inline 搶位助手**」懸浮按鈕。
-
-### 第四步：設定搶位參數
-點開右下角面板，設定您的預約條件：
+### 步驟三：設定搶位參數
+面板將自動載入或輸入您的預約條件：
 
 | 參數名稱 | 設定範例 | 說明 |
 | :--- | :--- | :--- |
@@ -69,11 +66,13 @@
 | **免訂金自動送出** | `勾選` | 當預約無須預收信用卡保證金時，全自動點擊「確認訂位」。 |
 | **鈴聲通知** | `勾選` | 搶位成功或遇到需手動輸入信用卡時發出音效提示。 |
 
-設定完成後點擊「**💾 儲存設定**」，瀏覽器將自動記錄您的偏好設定，下次開啟免重填。
+設定完成後點擊「**💾 儲存設定**」，瀏覽器將自動記錄您的偏好設定，下次在該瀏覽器貼上免重填。
 
-### 第五步：啟動搶位
+### 步驟四：啟動搶位
 - 點擊「**🚀 啟動搶位**」按鈕。
 - 面板狀態將轉為「等待開搶」並顯示精準倒數。搶位成功時將響起提示鈴聲並彈出系統通知！
+
+
 
 ---
 

@@ -37,27 +37,23 @@ graph TD
 
 ---
 
-## 2. 安裝與環境配置 (Chrome MV3)
+## 2. 快速使用方式（瀏覽器主控台 Console 貼上法）
 
-### 步驟 2.1：安裝 Tampermonkey（篡改猴 / 油猴）
-1. 開啟 Chrome，前往 [Chrome 線上應用程式商店 - Tampermonkey](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo)。
-2. 點擊「加到 Chrome」完成安裝。
+本助手為 **100% 純原生 JavaScript** 開發，**完全無需安裝 Tampermonkey（油猴）等任何擴充插件**，直接在瀏覽器 Console 貼上即可秒速啟動：
 
-### 步驟 2.2：啟用 Chrome「開發人員模式」（⚠️ 關鍵步驟）
-在最新的 Chrome (Manifest V3) 環境下，未開啟此開關將無法注入任何腳本：
-1. 在網址列輸入 `chrome://extensions` 並按下 Enter。
-2. 將視窗**右上角**的「**開發人員模式 (Developer mode)**」開關切換為 **開啟（藍色）**。
-3. 點擊 Tampermonkey 卡片上的「**詳細資訊**」，確認「**網站存取權**」設定為「**在所有網站上**」。
+### 步驟 2.1：開啟目標餐廳訂位頁面
+1. 使用 Google Chrome / Microsoft Edge / Safari / Brave 等主流瀏覽器，開啟您要預約的餐廳**專屬訂位頁面**（網址需帶有 `inline.app/booking/...`）。
 
-### 步驟 2.3：匯入搶位腳本
-1. 點擊 Chrome 右上角擴充功能列的 Tampermonkey 圖示，選擇「**新增腳本**」。
-2. 將專案中的 [`inline-reservation-bot.user.js`](./inline-reservation-bot.user.js) 內容**完整複製**。
-3. 貼上至編輯器中，按快捷鍵 `Ctrl + S`（Mac: `Cmd + S`）或點擊左上角「檔案 ➔ 儲存」。
-4. 回到「管理面板」，確認該腳本狀態為**啟用（綠色開關）**。
+### 步驟 2.2：打開開發者工具主控台 (Console)
+1. 在目標訂位網頁上按下鍵盤快捷鍵：
+   - **Windows / Linux**：按下 `F12` 或 `Ctrl + Shift + I`
+   - **Mac**：按下 `Cmd + Option + I`
+2. 於開發者工具頂部切換至 **「Console」（主控台）** 標籤頁。
 
-> [!TIP]
-> **備用急救方案（Console 貼上法）**：  
-> 若您在未安裝擴充功能的電腦上，可直接在目標訂位頁面按下鍵盤 `F12` 打開「開發人員工具」➔ 切換至「Console（主控台）」➔ 直接貼上腳本整段代碼並按 Enter，助手按鈕會立即在右下角現身！
+### 步驟 2.3：貼上代碼並按 Enter
+1. 複製專案中的 [`inline-reservation-bot.user.js`](./inline-reservation-bot.user.js) 完整代碼。
+2. 直接貼上至 Console 的游標處，並按下 **Enter** 執行。
+3. 頁面右下角將立即載入並**自動彈出「⚡ Inline 搶位助手」**控制面板！
 
 ---
 
