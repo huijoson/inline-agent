@@ -111,4 +111,43 @@ describe('Autonomous Submission Pipeline & Deposit Policy Guard (Issue #5)', () 
     assert.ok(notifications[0].body.includes('完成預約'));
     assert.ok(adapter._getState().submittedReservation);
   });
+
+  it('terminates into manual fallback when reservation submission rejects', async (t) => {
+    const adapter = createFakeReservationAdapter();
+    adapter.submitReservation = async () => {
+      throw new Error('reservation endpoint unavailable');
+    };
+    const lifecycle = [];
+    const statuses = [];
+    const notifications = [];
+    const logs = [];
+    const engine = createSnipingEngine({
+      adapter,
+      getConfig: () => ({
+        mode: 'drop',
+        dropTime: '00:00:05',
+        userName: '王小明',
+      }),
+      getNow: () => new Date('2026-09-01T00:00:00.000Z'),
+      onRunStateChange: (event) => lifecycle.push(event),
+      onStatusUpdate: (displayText, timeText, running) => {
+        statuses.push({ displayText, timeText, running });
+      },
+      onNotify: (title, body) => notifications.push({ title, body }),
+      logger: (message) => logs.push(message),
+    });
+    t.after(() => engine.stop());
+
+    assert.equal(engine.start(), true);
+    engine.submitCurrentReservation();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    assert.equal(engine.getStatus(), SnipingState.AWAITING_MANUAL_ACTION);
+    assert.equal(statuses.at(-1).running, false);
+    assert.ok(statuses.at(-1).displayText.includes('手動'));
+    assert.deepEqual(lifecycle.at(-1), { active: false, mode: 'drop' });
+    assert.ok(logs.some((message) => message.includes('reservation endpoint unavailable')));
+    assert.equal(notifications.length, 1);
+    assert.ok(notifications[0].body.includes('手動'));
+  });
 });

@@ -11,7 +11,7 @@
 ## 📑 目錄
 
 1. [系統特色與自動化架構](#1-系統特色與自動化架構)
-2. [安裝與環境配置 (Chrome MV3)](#2-安裝與環境配置-chrome-mv3)
+2. [安裝方式 (Tampermonkey)](#2-安裝方式tampermonkey)
 3. [控制台參數設定說明](#3-控制台參數設定說明)
 4. [標準搶位作業流程](#4-標準搶位作業流程)
 5. [實戰防禦：對抗「按壓不放確認是人類」](#5-實戰防禦對抗按壓不放確認是人類)
@@ -24,7 +24,7 @@
 本助手直接在您本機已登入的 Google Chrome 瀏覽器中運作，避開傳統爬蟲的環境特徵偵測，並具備以下核心技術：
 
 * ⏱️ **高精度伺服器對時**：動態計算與 inline 官方伺服器之時間偏差（Offset），消除本地時差。
-* 🔄 **無刷新軟觸發 (Zero-Reload)**：開搶時全面採用前端狀態軟查詢，絕不呼叫 `location.reload()`，避免驚動防火牆。
+* 🔄 **分模式更新策略**：準時放位保留頁面內的毫秒級重試；釋出撿漏則真正重新整理頁面，讓原本反白的日期重新取得伺服器狀態，並由 Tampermonkey 自動續跑。
 * ⚡ **五步全自動流水線**：
 
 ```mermaid
@@ -37,23 +37,27 @@ graph TD
 
 ---
 
-## 2. 快速使用方式（瀏覽器主控台 Console 貼上法）
+## 2. 安裝方式（Tampermonkey）
 
-本助手為 **100% 純原生 JavaScript** 開發，**完全無需安裝 Tampermonkey（油猴）等任何擴充插件**，直接在瀏覽器 Console 貼上即可秒速啟動：
+釋出撿漏需要在頁面重新整理後自動恢復，因此正式使用請安裝為 Tampermonkey userscript。Console 貼上版只適合單次測試或不需要重新整理的準時放位。
 
-### 步驟 2.1：開啟目標餐廳訂位頁面
-1. 使用 Google Chrome / Microsoft Edge / Safari / Brave 等主流瀏覽器，開啟您要預約的餐廳**專屬訂位頁面**（網址需帶有 `inline.app/booking/...`）。
+### 步驟 2.1：安裝 Tampermonkey
 
-### 步驟 2.2：打開開發者工具主控台 (Console)
-1. 在目標訂位網頁上按下鍵盤快捷鍵：
-   - **Windows / Linux**：按下 `F12` 或 `Ctrl + Shift + I`
-   - **Mac**：按下 `Cmd + Option + I`
-2. 於開發者工具頂部切換至 **「Console」（主控台）** 標籤頁。
+1. 從 [Tampermonkey 官方網站](https://www.tampermonkey.net/) 安裝瀏覽器擴充功能。
+2. 確認瀏覽器工具列中已出現 Tampermonkey 圖示。
 
-### 步驟 2.3：貼上代碼並按 Enter
-1. 複製專案中的 [`inline-reservation-bot.user.js`](./inline-reservation-bot.user.js) 完整代碼。
-2. 直接貼上至 Console 的游標處，並按下 **Enter** 執行。
-3. 頁面右下角將立即載入並**自動彈出「⚡ Inline 搶位助手」**控制面板！
+### 步驟 2.2：安裝 InlineSniper userscript
+
+1. 開啟 [`inline-reservation-bot.user.js`](https://raw.githubusercontent.com/huijoson/inline-agent/main/inline-reservation-bot.user.js)。
+2. 在 Tampermonkey 安裝畫面確認版本為 `2.2.0`，按下「安裝」。
+3. 開啟餐廳專屬訂位頁面（網址需包含 `inline.app/booking/`），右下角會出現「⚡ Inline 搶位助手」。
+
+### 步驟 2.3：驗證可恢復式撿漏
+
+1. 選擇「釋出撿漏」、設定日期與時段，按下「💾 儲存設定」後啟動。
+2. 日期反白或沒有時段時，日誌會顯示幾秒後重新整理頁面。
+3. 頁面重新載入後，確認日誌出現 `♻️ Tampermonkey 已自動恢復釋出撿漏`。
+4. 若要結束，務必按下「⏹️ 停止」；這會清除續跑狀態，下一次重新整理不會再啟動。
 
 ---
 
@@ -149,3 +153,8 @@ inline 採用全球頂級防護系統 **PerimeterX (HUMAN Security)**。任何�
 ### Q5：如何百分之百確認自己「真的訂到位了」？
 1. 畫面跳轉至「預約成功 / 訂位完成」頁面並出現訂位代號。
 2. **最可靠標準**：送出後 1 分鐘內，手機收到 inline 官方發出的 **SMS 訂位成功確認簡訊**。
+
+### Q6：釋出撿漏為什麼會重新整理頁面？
+* 客滿日期會在 inline 日曆中反白並停用，單純重複點擊無法取得新的可訂狀態。新版會在隨機間隔後重新整理頁面，由 Tampermonkey 重新載入腳本並自動恢復撿漏。
+* 若重新整理後沒有看到 `♻️ Tampermonkey 已自動恢復釋出撿漏`，請確認腳本是由 Tampermonkey 安裝，而不是只貼在 Console。
+* 按下「⏹️ 停止」後，重新整理不應再次自動啟動。

@@ -1,13 +1,18 @@
 // ==UserScript==
 // @name         Inline 餐廳自動搶位助手 (Inline Booking Sniper)
 // @namespace    https://github.com/inline-agent
-// @version      1.0.0
-// @description  支援準時放位開搶 (Opening Drop) 與釋出撿漏 (Cancellation Sniping)，自動校正伺服器時間、秒選時段、填寫表單並提供音效與桌面通知。
+// @version      2.2.0
+// @description  支援準時放位與 Tampermonkey 可恢復式釋出撿漏，自動校時、重新整理查詢、秒選時段、填表與送出。
 // @author       Antigravity
+// @homepageURL  https://github.com/huijoson/inline-agent
+// @supportURL   https://github.com/huijoson/inline-agent/issues
+// @updateURL    https://raw.githubusercontent.com/huijoson/inline-agent/main/inline-reservation-bot.user.js
+// @downloadURL  https://raw.githubusercontent.com/huijoson/inline-agent/main/inline-reservation-bot.user.js
 // @match        https://inline.app/*
 // @match        https://*.inline.app/*
 // @grant        none
 // @run-at       document-idle
+// @noframes
 // ==/UserScript==
 
 (function () {
@@ -17,6 +22,100 @@
   // 1. 常數與預設設定
   // ==========================================
   const STORAGE_KEY = 'INLINE_SNIPER_CONFIG_V1';
+  const RUNTIME_STORAGE_KEY = 'INLINE_SNIPER_RUNTIME_V1';
+  const INACTIVE_RUNTIME_STATE = Object.freeze({
+    active: false,
+    mode: null,
+    bookingTarget: '',
+  });
+
+  function createRuntimeStateStore(storage, key = RUNTIME_STORAGE_KEY) {
+    function load() {
+      try {
+        const parsed = JSON.parse(storage?.getItem(key) || 'null');
+        if (
+          !parsed ||
+          parsed.active !== true ||
+          parsed.mode !== 'cancellation' ||
+          !parsed.bookingTarget
+        ) {
+          return { ...INACTIVE_RUNTIME_STATE };
+        }
+        return {
+          active: true,
+          mode: 'cancellation',
+          bookingTarget: String(parsed.bookingTarget),
+        };
+      } catch (e) {
+        return { ...INACTIVE_RUNTIME_STATE };
+      }
+    }
+
+    return {
+      load,
+      activate(bookingTarget) {
+        if (!storage || !bookingTarget) return false;
+        try {
+          storage.setItem(key, JSON.stringify({
+            active: true,
+            mode: 'cancellation',
+            bookingTarget: String(bookingTarget),
+          }));
+          return true;
+        } catch (e) {
+          return false;
+        }
+      },
+      deactivate() {
+        if (!storage) return false;
+        try {
+          storage.removeItem(key);
+          return true;
+        } catch (e) {
+          return false;
+        }
+      },
+      shouldResume(bookingTarget) {
+        const saved = load();
+        return saved.active && saved.bookingTarget === bookingTarget;
+      },
+    };
+  }
+
+  function resumePersistedCancellation({
+    store,
+    bookingTarget,
+    mode,
+    start,
+    logger = () => {},
+  }) {
+    if (
+      mode !== 'cancellation' ||
+      !store ||
+      !store.shouldResume(bookingTarget) ||
+      typeof start !== 'function'
+    ) {
+      return false;
+    }
+
+    if (start() === false) return false;
+    logger('♻️ Tampermonkey 已自動恢復釋出撿漏');
+    return true;
+  }
+
+  function getBrowserLocalStorage() {
+    try {
+      return typeof localStorage !== 'undefined' ? localStorage : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function clearSiteCacheWithSnipingStopped({ stopSniping, clearStorage }) {
+    stopSniping();
+    return clearStorage();
+  }
+
   const DEFAULT_CONFIG = {
     enabled: false,
     mode: 'drop', // 'drop' (準時放位開搶) | 'cancellation' (撿漏輪詢)
@@ -68,6 +167,13 @@
   }
 
   let config = loadConfig();
+
+  const runtimeStateStore = createRuntimeStateStore(getBrowserLocalStorage());
+
+  function getCurrentBookingTarget() {
+    if (typeof window === 'undefined' || !window.location) return '';
+    return `${window.location.origin}${window.location.pathname}${window.location.search}`;
+  }
 
   // ==========================================
   // 2. 音效與系統通知模組 (Web Audio & Notification)
@@ -508,25 +614,30 @@
       clearBtn.addEventListener('click', async () => {
         const savedConfig = loadConfig();
         try {
-          if (typeof sessionStorage !== 'undefined') {
-            sessionStorage.clear();
-          }
-          if (typeof localStorage !== 'undefined') {
-            localStorage.clear();
-            saveConfig(savedConfig);
-          }
-          if (typeof caches !== 'undefined') {
-            const keys = await caches.keys();
-            await Promise.all(keys.map((k) => caches.delete(k)));
-          }
-          if (typeof indexedDB !== 'undefined' && indexedDB.databases) {
-            try {
-              const dbs = await indexedDB.databases();
-              dbs.forEach((db) => {
-                if (db.name) indexedDB.deleteDatabase(db.name);
-              });
-            } catch (e) {}
-          }
+          await clearSiteCacheWithSnipingStopped({
+            stopSniping: stopSniper,
+            clearStorage: async () => {
+              if (typeof sessionStorage !== 'undefined') {
+                sessionStorage.clear();
+              }
+              if (typeof localStorage !== 'undefined') {
+                localStorage.clear();
+                saveConfig(savedConfig);
+              }
+              if (typeof caches !== 'undefined') {
+                const keys = await caches.keys();
+                await Promise.all(keys.map((k) => caches.delete(k)));
+              }
+              if (typeof indexedDB !== 'undefined' && indexedDB.databases) {
+                try {
+                  const dbs = await indexedDB.databases();
+                  dbs.forEach((db) => {
+                    if (db.name) indexedDB.deleteDatabase(db.name);
+                  });
+                } catch (e) {}
+              }
+            },
+          });
           addLog('🧹 已成功清空 inline 網站快取與 Session 記錄！（搶位設定已自動保留）');
           alert('【快取清除成功】\n已成功清除該 inline 網站所有 LocalStorage、SessionStorage 與快取數據！\n\n（您的搶位設定已安全保留）');
         } catch (err) {
@@ -595,6 +706,11 @@
   function createInlineDomAdapter(deps = {}) {
     const doc = deps.document || (typeof document !== 'undefined' ? document : null);
     const log = deps.logger || (typeof addLog === 'function' ? addLog : console.log);
+    const reload = deps.reload || (() => {
+      if (typeof window === 'undefined' || !window.location) return false;
+      window.location.reload();
+      return true;
+    });
 
     function isElementClickable(el) {
       if (!el || el.disabled || (el.classList && el.classList.contains('disabled'))) return false;
@@ -704,6 +820,15 @@
     }
 
     return {
+      reloadPage() {
+        try {
+          return reload() !== false;
+        } catch (e) {
+          console.warn('[InlineSniper] reloadPage 異常', e);
+          return false;
+        }
+      },
+
       acknowledgeHouseRules() {
         if (!doc) return false;
         let handled = false;
@@ -1178,6 +1303,7 @@
     COUNTDOWN: 'COUNTDOWN',
     ACTIVE_SNIPING: 'ACTIVE_SNIPING',
     AWAITING_MANUAL_DEPOSIT: 'AWAITING_MANUAL_DEPOSIT',
+    AWAITING_MANUAL_ACTION: 'AWAITING_MANUAL_ACTION',
     COMPLETED: 'COMPLETED',
     // 相容別名 (Compatibility Aliases)
     AWAITING_FORM: 'ACTIVE_SNIPING',
@@ -1194,11 +1320,20 @@
       playSuccessSound();
       showNotification(title, body);
     });
+    const onRunStateChange = deps.onRunStateChange || (() => {});
+    const cancellationDateRetryIntervalMs = Number.isFinite(Number(deps.cancellationDateRetryIntervalMs))
+      ? Math.max(0, Number(deps.cancellationDateRetryIntervalMs))
+      : 100;
+    const cancellationDateRetryLimit = Number.isFinite(Number(deps.cancellationDateRetryLimit))
+      ? Math.max(0, Math.floor(Number(deps.cancellationDateRetryLimit)))
+      : 3;
 
     let currentStatus = SnipingState.IDLE;
+    let currentMode = null;
     let timerId = null;
     let pollTimeoutId = null;
     let dropIntervalId = null;
+    let cancellationDateRetryTimeoutId = null;
 
     function setStatus(newStatus, displayTxt, timeStr, running = true) {
       currentStatus = newStatus;
@@ -1211,17 +1346,25 @@
       if (timerId) clearInterval(timerId);
       if (pollTimeoutId) clearTimeout(pollTimeoutId);
       if (dropIntervalId) clearInterval(dropIntervalId);
+      if (cancellationDateRetryTimeoutId) clearTimeout(cancellationDateRetryTimeoutId);
       timerId = null;
       pollTimeoutId = null;
       dropIntervalId = null;
+      cancellationDateRetryTimeoutId = null;
     }
 
     function stop() {
       clearAllTimers();
       currentStatus = SnipingState.IDLE;
       state.isRunning = false;
+      onRunStateChange({ active: false, mode: currentMode });
       setStatus(SnipingState.IDLE, '🔴 待命', '--:--:--', false);
       logger('⏹️ 搶位程序已停止');
+    }
+
+    function finishPersistedRun() {
+      state.isRunning = false;
+      onRunStateChange({ active: false, mode: currentMode });
     }
 
     function submitCurrentReservation() {
@@ -1239,22 +1382,33 @@
       }).then((res) => {
         if (res.status === 'CONFIRMED') {
           clearAllTimers();
-          state.isRunning = false;
+          finishPersistedRun();
           setStatus(SnipingState.COMPLETED, '🟢 預約完成', '00:00:00', false);
           onNotify('Inline 訂位完成', '已自動為您點擊送出完成預約！請檢查信箱或簡訊確認信。');
         } else if (res.status === 'DEPOSIT_REQUIRED') {
           clearAllTimers();
-          state.isRunning = false;
+          finishPersistedRun();
           setStatus(SnipingState.AWAITING_MANUAL_DEPOSIT, '💳 需保證金', '--:--:--', false);
           onNotify('Inline 搶位提醒', '已成功鎖定時段！請立即於視窗確認並完成信用卡預授權。');
         } else if (res.status === 'SUBMIT_TIMEOUT' || res.status === 'HELD_FOR_MANUAL_SUBMISSION') {
           clearAllTimers();
-          state.isRunning = false;
+          finishPersistedRun();
           setStatus(SnipingState.COMPLETED, '🔔 時段已鎖定', '--:--:--', false);
           onNotify('Inline 搶位成功', '時段已鎖定！請點擊頁面送出完成預約。');
         }
-      }).catch((err) => {
+      }, (err) => {
+        clearAllTimers();
+        finishPersistedRun();
+        setStatus(
+          SnipingState.AWAITING_MANUAL_ACTION,
+          '⚠️ 請手動完成預約',
+          '--:--:--',
+          false
+        );
         logger(`❌ 送出預約時發生異常: ${err?.message || err}`);
+        onNotify('Inline 自動送出失敗', '自動送出發生異常，請立即在目前頁面手動完成預約。');
+      }).catch((err) => {
+        logger(`❌ 處理預約結果時發生異常: ${err?.message || err}`);
       });
     }
 
@@ -1265,11 +1419,14 @@
 
       const dateSelected = adapter.selectDate(cfg.targetDate);
       if (!dateSelected) {
-        logger(`⏳ 目標日期 【${cfg.targetDate}】 尚未完成選取或尚未開放，將於下次輪詢時重試...`);
-        scheduleNextPoll();
+        retryCancellationDateSelection(cfg);
         return;
       }
 
+      finishCancellationCycle(cfg);
+    }
+
+    function finishCancellationCycle(cfg) {
       adapter.selectTableType(parsePrioritySlots(cfg.tablePreference));
       const priorityList = parsePrioritySlots(cfg.prioritySlots);
       const picked = adapter.claimSlot(priorityList);
@@ -1281,21 +1438,39 @@
       }
     }
 
+    function retryCancellationDateSelection(cfg, retries = 0) {
+      if (retries >= cancellationDateRetryLimit) {
+        logger(`⏳ 目標日期 【${cfg.targetDate}】 尚未完成選取或尚未開放，將於下次輪詢時重試...`);
+        scheduleNextPoll();
+        return;
+      }
+
+      cancellationDateRetryTimeoutId = setTimeout(() => {
+        cancellationDateRetryTimeoutId = null;
+        if (!state.isRunning) return;
+
+        if (adapter.selectDate(cfg.targetDate)) {
+          finishCancellationCycle(cfg);
+          return;
+        }
+
+        retryCancellationDateSelection(cfg, retries + 1);
+      }, cancellationDateRetryIntervalMs);
+    }
+
     function scheduleNextPoll() {
       if (currentStatus === SnipingState.IDLE && !state.isRunning) return;
       const cfg = configProvider();
       const interval = Math.floor(
         Math.random() * (cfg.pollIntervalMax - cfg.pollIntervalMin + 1) + cfg.pollIntervalMin
       );
-      logger(`⏳ 目前無空位，將於 ${(interval / 1000).toFixed(1)} 秒後自動軟刷新查詢...`);
+      logger(`⏳ 目前無空位，將於 ${(interval / 1000).toFixed(1)} 秒後重新整理頁面查詢...`);
       pollTimeoutId = setTimeout(() => {
-        // 軟重觸發 (ADR-0002)：不執行 location.reload()
-        const refreshed = adapter.selectDate(cfg.targetDate);
-        if (!refreshed) {
-          adapter.setPartySize(cfg.adults, cfg.kids);
+        const reloaded = adapter.reloadPage && adapter.reloadPage();
+        if (!reloaded) {
+          logger('❌ 無法重新整理頁面，釋出撿漏已停止');
+          stop();
         }
-        adapter.selectTableType(parsePrioritySlots(cfg.tablePreference));
-        setTimeout(executeCancellationCycle, 400);
       }, interval);
     }
 
@@ -1394,8 +1569,18 @@
 
     function start() {
       clearAllTimers();
-      state.isRunning = true;
       const cfg = configProvider();
+      currentMode = cfg.mode;
+
+      const runStateChanged = onRunStateChange({ active: true, mode: currentMode });
+      if (currentMode === 'cancellation' && runStateChanged === false) {
+        state.isRunning = false;
+        setStatus(SnipingState.IDLE, '🔴 無法啟動', '--:--:--', false);
+        logger('❌ 無法啟動釋出撿漏：瀏覽器無法儲存重新整理後的續跑狀態');
+        return false;
+      }
+
+      state.isRunning = true;
       setStatus(SnipingState.ACTIVE_SNIPING, '🟢 運行中', '--:--:--', true);
       logger(`🚀 搶位程序啟動 [模式: ${cfg.mode === 'drop' ? '準時放位' : '釋出撿漏'}]`);
 
@@ -1403,7 +1588,7 @@
       if (adapter.isContactFormPage && adapter.isContactFormPage()) {
         logger('📋 偵測到已在聯絡資訊頁面，立即執行自動填表與送出！');
         submitCurrentReservation();
-        return;
+        return true;
       }
 
       if (cfg.mode === 'drop') {
@@ -1411,6 +1596,7 @@
       } else {
         executeCancellationCycle();
       }
+      return true;
     }
 
     return {
@@ -1426,7 +1612,15 @@
     };
   }
 
-  const SnipingEngine = createSnipingEngine();
+  const SnipingEngine = createSnipingEngine({
+    onRunStateChange(event) {
+      if (event.active && event.mode === 'cancellation') {
+        return runtimeStateStore.activate(getCurrentBookingTarget());
+      } else {
+        return runtimeStateStore.deactivate();
+      }
+    },
+  });
 
   // 頂層調度進入點 (Top-Level Controller)
   function startSniper() {
@@ -1440,6 +1634,20 @@
   // ==========================================
   // 7. 初始化與面板掛載
   // ==========================================
+  let resumeAttempted = false;
+
+  function attemptCancellationResume() {
+    if (resumeAttempted || typeof document === 'undefined' || !document.body) return false;
+    resumeAttempted = true;
+    return resumePersistedCancellation({
+      store: runtimeStateStore,
+      bookingTarget: getCurrentBookingTarget(),
+      mode: config.mode,
+      start: () => SnipingEngine.start(),
+      logger: addLog,
+    });
+  }
+
   function ensureFloatingPanel() {
     if (typeof window === 'undefined' || !window.location || !window.location.hostname || !window.location.hostname.includes('inline.app')) return;
     if (document.getElementById('inline-auto-sniper-panel')) return;
@@ -1456,18 +1664,21 @@
     ensureFloatingPanel();
     InlineDomAdapter.acknowledgeHouseRules();
     checkCaptchaAlert();
+    attemptCancellationResume();
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => {
         ensureFloatingPanel();
         InlineDomAdapter.acknowledgeHouseRules();
         checkCaptchaAlert();
+        attemptCancellationResume();
       });
     }
     window.addEventListener('load', () => {
       ensureFloatingPanel();
       InlineDomAdapter.acknowledgeHouseRules();
       checkCaptchaAlert();
+      attemptCancellationResume();
     });
 
     // 每 600ms 檢查一次：確保面板存在、自動勾選同意彈出的用餐須知，並在出現驗證碼時即刻發出警報聲
@@ -1484,6 +1695,9 @@
     module.exports = {
       createInlineDomAdapter,
       InlineDomAdapter,
+      clearSiteCacheWithSnipingStopped,
+      createRuntimeStateStore,
+      resumePersistedCancellation,
       createSnipingEngine,
       SnipingEngine,
       SnipingState,

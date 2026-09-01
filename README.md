@@ -1,6 +1,6 @@
 # Inline 餐廳自動搶位助手 (Inline Booking Sniper)
 
-專為 **inline.app** 訂位平台打造的高效能、免受反爬蟲阻擋的瀏覽器自動搶位助手。**無需安裝任何擴充套件（免 Tampermonkey）**，直接於本機已登入的 Google Chrome / Edge 等瀏覽器 Console（主控台）貼上一鍵運行，避開 PerimeterX 機器人防護，支援**準時放位開搶 (Opening Drop)** 與 **釋出撿漏輪詢 (Cancellation Sniping)** 雙模式。
+專為 **inline.app** 訂位平台打造的瀏覽器自動搶位助手。正式使用建議安裝為 **Tampermonkey userscript**：支援**準時放位開搶 (Opening Drop)**，也能在**釋出撿漏 (Cancellation Sniping)** 時真正重新整理頁面並自動恢復監控。Console（主控台）貼上方式仍可用於單次測試與準時放位，但無法跨頁面重新整理續跑。
 
 <p align="center">
   <img src="./docs/infographic.jpg" alt="Inline 搶位助手全自動指南 Infographic" width="480" />
@@ -10,12 +10,12 @@
 
 ## 🌟 核心特色
 
-- ⚡ **零安裝極速運行**：免裝油猴擴充插件，直接在瀏覽器 Console 貼上即可秒速啟動，隨開隨用。
+- 🐒 **Tampermonkey 常駐執行**：userscript 會在 inline 訂位頁自動載入；撿漏重新整理後會依相同 Booking Target 與已儲存設定自動續跑。
 - 🛡️ **原生環境規避反爬蟲**：直接於本機已登入的 Chrome 頁面中運作，避開 `px-captcha` 機器人阻擋與驗證碼風控。
 - ⏱️ **伺服器精準對時**：動態取得 Inline 伺服器時間計算真實偏差值（Clock Offset），支援毫秒級（T-180ms）放位倒數精準觸發。
 - ⚡ **雙模式搶位架構**：
   - **準時放位開搶 (Opening Drop)**：倒數至指定放位時刻（如 `00:00:00` 或 `12:00:00`），以軟刷新（Soft Re-trigger）與輪詢補償在放位瞬間秒鎖時段。
-  - **釋出撿漏輪詢 (Cancellation Sniping)**：以安全隨機間隔持續監控已被訂滿的日期，一旦有人退訂釋出空位立即秒搶。
+  - **釋出撿漏輪詢 (Cancellation Sniping)**：以隨機間隔真正重新整理訂位頁，重新取得反白日期的伺服器狀態；頁面載入後由 Tampermonkey 自動恢復，一旦解除反白並出現時段便立即嘗試預訂。
 - 🪑 **用餐桌型智慧偏好 (Table Category Selection)**：
   - **預設首選策略**：自動選取首個可用桌型，免去「請選擇用餐桌型」卡關。
   - **雙向模糊語意比對**：精準支援跨分店異名比對（如：高雄漢神店 `吧台板前` vs 桃園店 `板前吧台` vs 台中店 `板前座位（吧台座位）`）。
@@ -29,24 +29,23 @@
 - 🧹 **一鍵快取清除 (Clear Site Cache)**：面板內建快取重設功能，一鍵清除 LocalStorage、SessionStorage 與快取數據，並智慧保留搶位偏好。
 - 🔔 **雙重成功提醒**：Web Audio API 慶祝提示音 + 瀏覽器系統級桌面通知（Notification API）。
 - 🎛️ **懸浮控制面板**：貼上執行後面板自動展開，支援即時參數設定、本機儲存（LocalStorage）與即時日誌監控。
-- 🧪 **自動化測試覆蓋**：內建 46 項單元測試與契約測試（`npm test`），確保核心邏輯穩健可靠。
+- 🧪 **自動化測試覆蓋**：內建 66 項單元測試與契約測試（`npm test`），確保核心邏輯穩健可靠。
 
 ---
 
-## 🚀 3 秒極速使用步驟 (Zero-Install)
+## 🚀 Tampermonkey 安裝與使用
 
-### 步驟一：開啟目標餐廳訂位頁面
+### 步驟一：安裝 Tampermonkey 與 userscript
+
+1. 從 [Tampermonkey 官方網站](https://www.tampermonkey.net/) 安裝符合瀏覽器的擴充功能。
+2. 開啟 [`inline-reservation-bot.user.js`](https://raw.githubusercontent.com/huijoson/inline-agent/main/inline-reservation-bot.user.js)；Tampermonkey 應顯示 userscript 安裝畫面。
+3. 確認腳本版本為 `2.2.0`，按下「安裝」。
+4. 之後開啟符合 `https://inline.app/*` 的頁面，腳本會自動載入。新版包含 `@updateURL` 與 `@downloadURL`，後續可由 Tampermonkey 檢查更新。
+
+### 步驟二：開啟目標餐廳訂位頁面
 1. 使用 Chrome / Edge 等瀏覽器開啟您想預約的**店家專屬訂位頁面**（網址開頭需為 `https://inline.app/booking/...`）。
 > [!NOTE]
 > 請勿留在 `dining.inline.app/.../discover/...` 餐廳目錄總覽頁，需點進餐廳卡片的「**訂位 ↗**」專屬頁面。
-
-### 步驟二：打開開發者工具 Console 貼上執行
-1. 在訂位頁面按下鍵盤快捷鍵開啟「開發者工具」：
-   - **Windows / Linux**：按 `F12` 或 `Ctrl + Shift + I`
-   - **Mac**：按 `Cmd + Option + I`
-2. 切換到頂部的 **Console (主控台)** 標籤頁。
-3. 複製 [`inline-reservation-bot.user.js`](./inline-reservation-bot.user.js) 整段代碼，直接**貼上到 Console 中並按下 Enter**。
-4. 畫面上將立即跳出「**⚡ Inline 搶位助手**」控制台！
 
 ### 步驟三：設定搶位參數
 面板將自動載入或輸入您的預約條件：
@@ -68,11 +67,16 @@
 | **免訂金確認** | `自動` | 當預約無須預收信用卡保證金時，固定全自動點擊「確認訂位」。 |
 | **鈴聲通知** | `勾選` | 搶位成功或遇到需手動輸入信用卡時發出音效提示。 |
 
-設定完成後點擊「**💾 儲存設定**」，瀏覽器將自動記錄您的偏好設定，下次在該瀏覽器貼上免重填。
+設定完成後點擊「**💾 儲存設定**」，瀏覽器將自動記錄您的偏好設定；之後由 Tampermonkey 自動載入 userscript 時無須重新填寫。
 
 ### 步驟四：啟動搶位
 - 點擊「**🚀 啟動搶位**」按鈕。
 - 面板狀態將轉為「等待開搶」並顯示精準倒數。搶位成功時將響起提示鈴聲並彈出系統通知！
+- 在「釋出撿漏」模式中，沒有空位或日期仍反白時會顯示重新整理倒數。重新整理後應看到 `♻️ Tampermonkey 已自動恢復釋出撿漏`。
+- 按下「**⏹️ 停止**」會清除持久化執行狀態，之後重新整理不會再自動啟動。
+
+> [!WARNING]
+> Console 貼上版在重新整理後會消失，因此不能用於新版的可恢復式釋出撿漏；若只做單次準時放位或開發測試，仍可手動貼上執行。
 
 
 
@@ -104,7 +108,7 @@ node --test
 
 ## 📚 專案架構與設計決策 (ADR)
 
-- 📘 **[完整使用者操作手冊 (USER_GUIDE.md)](./USER_GUIDE.md)**：包含 Chrome MV3 安裝、參數設定、實戰人機協同與對抗 PerimeterX 按壓防護的完整教學指南。
+- 📘 **[完整使用者操作手冊 (USER_GUIDE.md)](./USER_GUIDE.md)**：包含 v2.2.0 Tampermonkey userscript 安裝、參數設定、實戰人機協同與對抗 PerimeterX 按壓防護的完整教學指南。
 - 📖 **[領域模型規範 (CONTEXT.md)](./CONTEXT.md)**：定義本系統之領域術語（Reservation, Priority Slot List, Table Category, Deposit Policy 等）。
 - 🏛️ **[ADR 0001: Adopt Tampermonkey Userscript Architecture](./docs/adr/0001-userscript-architecture.md)**：說明採用本機油猴腳本而非外部 CDP 腳本以規避 PerimeterX 的架構決策。
 - 🏛️ **[ADR 0002: Soft Re-triggering Over Full Page Reload](./docs/adr/0002-soft-retrigger-over-full-reload.md)**：說明開搶時採用毫秒級軟刷新機制以將延遲降至最低的考量。

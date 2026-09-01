@@ -39,6 +39,7 @@ function createFakeReservationAdapter(options = {}) {
     isContactFormPage: options.isContactFormPage ?? false,
     submittedReservation: null,
     submissionDelayMs: options.submissionDelayMs || 0,
+    reloadCount: 0,
     callLog: [],
   };
 
@@ -128,6 +129,12 @@ function createFakeReservationAdapter(options = {}) {
         }
       }
       return null;
+    },
+
+    reloadPage() {
+      state.callLog.push({ method: 'reloadPage', timestamp: Date.now() });
+      state.reloadCount++;
+      return true;
     },
 
     // 4.1 Advance to Contact Form

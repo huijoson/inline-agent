@@ -259,6 +259,22 @@ describe('InlineDomAdapter Unit Tests (Issue #3)', () => {
     });
   });
 
+  describe('reloadPage()', () => {
+    it('delegates a real page reload through the adapter seam', () => {
+      let reloadCount = 0;
+      const adapter = createInlineDomAdapter({
+        document: createMockDocument([]),
+        reload: () => {
+          reloadCount++;
+        },
+        logger: () => {},
+      });
+
+      assert.equal(adapter.reloadPage(), true);
+      assert.equal(reloadCount, 1);
+    });
+  });
+
   describe('selectTableType()', () => {
     it('defaults to selecting the first available table type when no preference is provided', () => {
       let clickedTag = null;
@@ -473,6 +489,79 @@ describe('InlineDomAdapter Unit Tests (Issue #3)', () => {
       engine.stop();
 
       assert.equal(claimedForDate, '2026-09-18');
+    });
+
+    it('finishes a collapsed date-picker transition during Cancellation Sniping before reloading', async (t) => {
+      let selectedDate = '2026-09-01';
+      let claimedForDate = null;
+      let reloadCount = 0;
+
+      const datePicker = createMockElement('div', {
+        id: 'date-picker',
+        'data-cy': 'date-picker',
+        'aria-expanded': 'false',
+        innerText: '9月1日週二 (今日)',
+      });
+      const selectedDateSummary = createMockElement('button', {
+        'data-cy': 'target-date',
+        innerText: '2026年9月1日',
+      });
+      const targetDay = createMockElement('div', {
+        'data-cy': 'bt-cal-day',
+        'data-date': '2026-09-18',
+        hidden: true,
+        innerText: '18',
+      });
+      const slot = createMockElement('button', { innerText: '18:00' });
+
+      datePicker.addEventListener('click', () => {
+        datePicker.setAttribute('aria-expanded', 'true');
+        targetDay.offsetParent = {};
+      });
+      targetDay.addEventListener('click', () => {
+        setTimeout(() => {
+          selectedDateSummary.innerText = '2026年9月18日';
+          selectedDate = '2026-09-18';
+        }, 0);
+      });
+      slot.addEventListener('click', () => {
+        claimedForDate = selectedDate;
+      });
+
+      const adapter = createInlineDomAdapter({
+        document: createMockDocument([datePicker, selectedDateSummary, targetDay, slot]),
+        reload: () => {
+          reloadCount++;
+        },
+        logger: () => {},
+      });
+      adapter.selectTableType = () => null;
+      adapter.submitReservation = async () => ({ success: true, status: 'CONFIRMED' });
+
+      const engine = createSnipingEngine({
+        adapter,
+        getConfig: () => ({
+          mode: 'cancellation',
+          pollIntervalMin: 5,
+          pollIntervalMax: 5,
+          targetDate: '2026-09-18',
+          adults: '4',
+          kids: '0',
+          prioritySlots: '18:00',
+        }),
+        cancellationDateRetryIntervalMs: 5,
+        cancellationDateRetryLimit: 4,
+        logger: () => {},
+        onStatusUpdate: () => {},
+        onNotify: () => {},
+      });
+      t.after(() => engine.stop());
+
+      engine.start();
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      assert.equal(claimedForDate, '2026-09-18');
+      assert.equal(reloadCount, 0);
     });
   });
 

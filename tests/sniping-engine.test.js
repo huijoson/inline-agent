@@ -60,40 +60,67 @@ describe('SnipingEngine Orchestration & Seam Integration (Issue #4)', () => {
     });
   });
 
-  describe('Cancellation Sniping Flow via Seam (Soft Re-trigger)', () => {
-    it('queries available slots, and if unavailable, triggers soft re-selection without reloading', () => {
+  describe('Cancellation Sniping Flow via Seam (Tampermonkey Reload)', () => {
+    it('reloads the page when the target Booking Date is disabled', async (t) => {
       const adapter = createFakeReservationAdapter({
-        availableSlots: [], // initially empty
+        availableDates: ['2026-10-31'],
       });
 
-      const logs = [];
       const engine = createSnipingEngine({
         adapter,
         getConfig: () => ({
           mode: 'cancellation',
-          pollIntervalMin: 50,
-          pollIntervalMax: 100,
-          targetDate: '2026-09-01',
-          adults: '2',
+          pollIntervalMin: 5,
+          pollIntervalMax: 5,
+          targetDate: '2026-11-01',
+          adults: '4',
           kids: '0',
-          prioritySlots: '19:00',
+          prioritySlots: '18:00',
         }),
-        logger: (msg) => logs.push(msg),
+        cancellationDateRetryIntervalMs: 5,
+        cancellationDateRetryLimit: 4,
+        logger: () => {},
         onStatusUpdate: () => {},
       });
+      t.after(() => engine.stop());
 
-      engine.executeCancellationCycle();
+      engine.start();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+
+      assert.equal(adapter._getState().reloadCount, 1);
       assert.equal(adapter._getState().claimedSlot, null);
+      assert.equal(
+        adapter._getCallLog().filter((call) => call.method === 'selectDate').length,
+        5,
+        'retries the Booking Date exactly four times after the initial failed selection'
+      );
+    });
 
-      // Verify seam was called
-      const methods = adapter._getCallLog().map((c) => c.method);
-      assert.ok(methods.includes('acknowledgeHouseRules'));
-      assert.ok(methods.includes('setPartySize'));
-      assert.ok(methods.includes('selectDate'));
-      assert.ok(methods.includes('selectTableType'));
-      assert.ok(methods.includes('claimSlot'));
+    it('reloads the page when the target date is selected but has no Time Slot', async (t) => {
+      const adapter = createFakeReservationAdapter({
+        availableDates: ['2026-11-01'],
+        availableSlots: [],
+      });
+      const engine = createSnipingEngine({
+        adapter,
+        getConfig: () => ({
+          mode: 'cancellation',
+          pollIntervalMin: 5,
+          pollIntervalMax: 5,
+          targetDate: '2026-11-01',
+          adults: '4',
+          kids: '0',
+          prioritySlots: '18:00',
+        }),
+        logger: () => {},
+        onStatusUpdate: () => {},
+      });
+      t.after(() => engine.stop());
 
-      engine.stop();
+      engine.start();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      assert.equal(adapter._getState().reloadCount, 1);
     });
   });
 
@@ -122,6 +149,58 @@ describe('SnipingEngine Orchestration & Seam Integration (Issue #4)', () => {
 
       engine.stop();
       assert.equal(engine.getStatus(), SnipingState.IDLE);
+    });
+
+    it('publishes inactive lifecycle state when the operator stops Cancellation Sniping', () => {
+      const lifecycle = [];
+      const engine = createSnipingEngine({
+        adapter: createFakeReservationAdapter(),
+        getConfig: () => ({
+          mode: 'cancellation',
+          pollIntervalMin: 1000,
+          pollIntervalMax: 1000,
+          targetDate: '2026-11-01',
+          prioritySlots: '18:00',
+        }),
+        onRunStateChange: (event) => lifecycle.push(event),
+        onStatusUpdate: () => {},
+        logger: () => {},
+      });
+
+      engine.start();
+      engine.stop();
+
+      assert.deepEqual(lifecycle, [
+        { active: true, mode: 'cancellation' },
+        { active: false, mode: 'cancellation' },
+      ]);
+    });
+
+    it('publishes inactive lifecycle state after a successful reservation', async () => {
+      const lifecycle = [];
+      const engine = createSnipingEngine({
+        adapter: createFakeReservationAdapter({
+          availableDates: ['2026-11-01'],
+          availableSlots: ['18:00'],
+        }),
+        getConfig: () => ({
+          mode: 'cancellation',
+          targetDate: '2026-11-01',
+          prioritySlots: '18:00',
+        }),
+        onRunStateChange: (event) => lifecycle.push(event),
+        onStatusUpdate: () => {},
+        onNotify: () => {},
+        logger: () => {},
+      });
+
+      engine.start();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      assert.deepEqual(lifecycle.at(-1), {
+        active: false,
+        mode: 'cancellation',
+      });
     });
 
     it('preserves AWAITING_MANUAL_DEPOSIT state when deposit policy requires credit card', async () => {

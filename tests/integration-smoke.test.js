@@ -6,6 +6,7 @@ const path = require('node:path');
 describe('Integration & Single-File Userscript Verification (Issue #6)', () => {
   const userscriptPath = path.resolve(__dirname, '../inline-reservation-bot.user.js');
   const fileContent = fs.readFileSync(userscriptPath, 'utf8');
+  const mirrorContent = fs.readFileSync(path.resolve(__dirname, '../inline-sniper.js'), 'utf8');
 
   it('preserves valid Tampermonkey userscript metadata header', () => {
     assert.ok(fileContent.includes('// ==UserScript=='), 'Must contain UserScript start tag');
@@ -14,6 +15,15 @@ describe('Integration & Single-File Userscript Verification (Issue #6)', () => {
     assert.ok(fileContent.includes('// @grant        none'), 'Must use grant none for native DOM context');
     assert.ok(fileContent.includes('// @run-at       document-idle'), 'Must run at document-idle');
     assert.ok(fileContent.includes('// ==/UserScript=='), 'Must contain UserScript end tag');
+  });
+
+  it('publishes updateable Tampermonkey metadata and identical distributed scripts', () => {
+    const rawUserscriptUrl = 'https://raw.githubusercontent.com/huijoson/inline-agent/main/inline-reservation-bot.user.js';
+
+    assert.ok(fileContent.includes('// @version      2.2.0'));
+    assert.ok(fileContent.includes(`// @updateURL    ${rawUserscriptUrl}`));
+    assert.ok(fileContent.includes(`// @downloadURL  ${rawUserscriptUrl}`));
+    assert.equal(fileContent, mirrorContent);
   });
 
   it('exports clean IIFE module interface without global namespace pollution in browser', () => {
