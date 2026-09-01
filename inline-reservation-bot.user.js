@@ -34,7 +34,6 @@
     userEmail: '',
     userGender: 'male', // 'male' | 'female'
     bookingNote: '',
-    autoSubmitFree: true, // 免訂金是否全自動送出
     soundAlert: true,
     desktopNotification: true,
   };
@@ -451,9 +450,6 @@
 
           <div class="ias-group" style="display: flex; gap: 12px; margin-top: 6px;">
             <label style="display: inline-flex; align-items: center; gap: 4px; font-weight: normal; cursor: pointer;">
-              <input type="checkbox" id="ias-auto-submit" ${config.autoSubmitFree ? 'checked' : ''}> 免訂金自動送出
-            </label>
-            <label style="display: inline-flex; align-items: center; gap: 4px; font-weight: normal; cursor: pointer;">
               <input type="checkbox" id="ias-sound" ${config.soundAlert ? 'checked' : ''}> 鈴聲通知
             </label>
           </div>
@@ -574,7 +570,6 @@
     config.userPhone = document.getElementById('ias-user-phone').value.trim();
     config.userEmail = document.getElementById('ias-user-email').value.trim();
     config.bookingNote = document.getElementById('ias-booking-note').value.trim();
-    config.autoSubmitFree = document.getElementById('ias-auto-submit').checked;
     config.soundAlert = document.getElementById('ias-sound').checked;
   }
 
@@ -780,6 +775,29 @@
         try {
           const targetDateFormatted = targetDate.replace(/-/g, '');
 
+          const selectedDateSummary = doc.querySelector('[data-cy="target-date"]');
+          const selectedDateText = (selectedDateSummary?.innerText || selectedDateSummary?.textContent || '').trim();
+          const selectedDateMatch = selectedDateText.match(/(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日/);
+          const confirmedDate = selectedDateMatch
+            ? `${selectedDateMatch[1]}-${selectedDateMatch[2].padStart(2, '0')}-${selectedDateMatch[3].padStart(2, '0')}`
+            : '';
+
+          if (confirmedDate === targetDate) {
+            log(`📅 目標日期已確認: ${targetDate}`);
+            return true;
+          }
+
+          const datePicker = doc.getElementById('date-picker') || doc.querySelector('[data-cy="date-picker"]');
+          if (
+            datePicker &&
+            datePicker.getAttribute?.('aria-expanded') === 'false' &&
+            isElementClickable(datePicker)
+          ) {
+            datePicker.click();
+            log(`📅 已展開用餐日期選單，準備選取: ${targetDate}`);
+            return false;
+          }
+
           const findDateEl = () => {
             const dayElements = Array.from(doc.querySelectorAll('[data-date], button[data-date], div[data-date], button, div[role="button"]'));
             return dayElements.find((el) => {
@@ -810,10 +828,15 @@
             }
           }
 
+          if (matchDateEl?.getAttribute?.('aria-selected') === 'true') {
+            log(`📅 目標日期已選取: ${targetDate}`);
+            return true;
+          }
+
           if (matchDateEl && isElementClickable(matchDateEl)) {
             matchDateEl.click();
-            log(`📅 點擊目標日期: ${targetDate}`);
-            return true;
+            log(`📅 已點擊目標日期，等待頁面完成切換: ${targetDate}`);
+            return false;
           }
         } catch (e) {
           console.warn('[InlineSniper] selectDate 異常', e);
@@ -1212,7 +1235,7 @@
         note: cfg.bookingNote,
         tablePreference: cfg.tablePreference,
       }, {
-        autoSubmit: cfg.autoSubmitFree,
+        autoSubmit: true,
       }).then((res) => {
         if (res.status === 'CONFIRMED') {
           clearAllTimers();
@@ -1242,7 +1265,7 @@
 
       const dateSelected = adapter.selectDate(cfg.targetDate);
       if (!dateSelected) {
-        logger(`⏳ 目標日期 【${cfg.targetDate}】 尚未在日曆開放選取，將於下次輪詢時重試...`);
+        logger(`⏳ 目標日期 【${cfg.targetDate}】 尚未完成選取或尚未開放，將於下次輪詢時重試...`);
         scheduleNextPoll();
         return;
       }
@@ -1324,14 +1347,14 @@
         const dateSelected = adapter.selectDate(cfg.targetDate);
         if (!dateSelected) {
           if (attempts === 1) {
-            logger(`⚠️ 目標日期 【${cfg.targetDate}】 尚未在日曆開放，等待放位刷出...`);
+            logger(`⏳ 目標日期 【${cfg.targetDate}】 尚未完成選取或尚未開放，等待頁面更新...`);
           }
           if (attempts >= 30) {
             if (dropIntervalId) {
               clearInterval(dropIntervalId);
               dropIntervalId = null;
             }
-            logger(`❌ 搶位結束：目標日期 【${cfg.targetDate}】 尚未開放選取`);
+            logger(`❌ 搶位結束：無法確認目標日期 【${cfg.targetDate}】 已完成選取`);
             stop();
             return false;
           }

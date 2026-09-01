@@ -57,6 +57,13 @@ function createMockElement(tagName = 'div', attrs = {}) {
 function createMockDocument(elements = []) {
   return {
     querySelectorAll(selector) {
+      if (selector.includes('[data-date]')) {
+        return elements.filter((e) =>
+          e.hasAttribute('data-date') ||
+          e.tagName === 'BUTTON' ||
+          e.getAttribute('role') === 'button'
+        );
+      }
       if (selector.includes('table-tag') || selector.includes('data-cy') || selector.includes('data-testid')) {
         return elements.filter((e) => (e.getAttribute && (e.getAttribute('data-cy')?.includes('table-tag') || e.getAttribute('data-testid'))) || e.id === 'table-tag-selector' || e.tagName === 'BUTTON');
       }
@@ -72,6 +79,12 @@ function createMockDocument(elements = []) {
       return elements;
     },
     querySelector(selector) {
+      if (selector.includes('target-date')) {
+        return elements.find((e) => e.getAttribute('data-cy') === 'target-date') || null;
+      }
+      if (selector.includes('#date-picker') || selector.includes('[data-cy="date-picker"]')) {
+        return elements.find((e) => e.id === 'date-picker' || e.getAttribute('data-cy') === 'date-picker') || null;
+      }
       if (selector.includes('iframe')) {
         return elements.find((e) => e.tagName === 'IFRAME') || null;
       }
@@ -109,7 +122,7 @@ function createMockDocument(elements = []) {
 
 describe('InlineDomAdapter Unit Tests (Issue #3)', () => {
   // Import adapter factory from userscript
-  const { createInlineDomAdapter } = require('../inline-reservation-bot.user.js');
+  const { createInlineDomAdapter, createSnipingEngine } = require('../inline-reservation-bot.user.js');
 
   it('exports createInlineDomAdapter factory', () => {
     assert.equal(typeof createInlineDomAdapter, 'function');
@@ -153,7 +166,7 @@ describe('InlineDomAdapter Unit Tests (Issue #3)', () => {
   });
 
   describe('selectDate()', () => {
-    it('locates and clicks corresponding data-date element', () => {
+    it('clicks a rendered target date without reporting success before the DOM confirms selection', () => {
       let clicked = false;
       const dateButton = createMockElement('button', {
         'data-date': '2026-09-01',
@@ -166,7 +179,7 @@ describe('InlineDomAdapter Unit Tests (Issue #3)', () => {
       const adapter = createInlineDomAdapter({ document: doc, logger: () => {} });
 
       const success = adapter.selectDate('2026-09-01');
-      assert.equal(success, true);
+      assert.equal(success, false);
       assert.equal(clicked, true);
     });
 
@@ -176,6 +189,73 @@ describe('InlineDomAdapter Unit Tests (Issue #3)', () => {
 
       const success = adapter.selectDate('2026-09-15');
       assert.equal(success, false);
+    });
+
+    it('accepts a rendered target date that is already selected and therefore not clickable', () => {
+      let clickCount = 0;
+      const selectedDate = createMockElement('button', {
+        'data-date': '2026-09-18',
+        'aria-selected': 'true',
+        disabled: true,
+      });
+      selectedDate.addEventListener('click', () => {
+        clickCount++;
+      });
+
+      const doc = createMockDocument([selectedDate]);
+      const adapter = createInlineDomAdapter({ document: doc, logger: () => {} });
+
+      const success = adapter.selectDate('2026-09-18');
+
+      assert.equal(success, true);
+      assert.equal(clickCount, 0);
+    });
+
+    it('accepts the target date confirmed by the real inline target-date summary', () => {
+      const selectedDateSummary = createMockElement('button', {
+        'data-cy': 'target-date',
+        innerText: '2026年9月18日',
+      });
+      const hiddenTargetDay = createMockElement('div', {
+        'data-cy': 'bt-cal-day',
+        'data-date': '2026-09-18',
+        hidden: true,
+        innerText: '18',
+      });
+
+      const doc = createMockDocument([selectedDateSummary, hiddenTargetDay]);
+      const adapter = createInlineDomAdapter({ document: doc, logger: () => {} });
+
+      assert.equal(adapter.selectDate('2026-09-18'), true);
+    });
+
+    it('opens the real inline date picker before attempting to click a hidden target day', () => {
+      const datePicker = createMockElement('div', {
+        id: 'date-picker',
+        'data-cy': 'date-picker',
+        'aria-expanded': 'false',
+        innerText: '9月1日週二 (今日)',
+      });
+      const selectedDateSummary = createMockElement('button', {
+        'data-cy': 'target-date',
+        innerText: '2026年9月1日',
+      });
+      const hiddenTargetDay = createMockElement('div', {
+        'data-cy': 'bt-cal-day',
+        'data-date': '2026-09-18',
+        hidden: true,
+        innerText: '18',
+      });
+      datePicker.addEventListener('click', () => {
+        datePicker.setAttribute('aria-expanded', 'true');
+        hiddenTargetDay.offsetParent = {};
+      });
+
+      const doc = createMockDocument([datePicker, selectedDateSummary, hiddenTargetDay]);
+      const adapter = createInlineDomAdapter({ document: doc, logger: () => {} });
+
+      assert.equal(adapter.selectDate('2026-09-18'), false);
+      assert.equal(datePicker.getAttribute('aria-expanded'), 'true');
     });
   });
 
@@ -285,6 +365,114 @@ describe('InlineDomAdapter Unit Tests (Issue #3)', () => {
       const claimed = adapter.claimSlot(['19:00', '20:00']);
       assert.equal(claimed, '19:00');
       assert.equal(clickedSlot, '19:00');
+    });
+
+    it('waits for an asynchronously selected target date before claiming its Time Slot', async () => {
+      let selectedDate = '2026-09-01';
+      let claimedForDate = null;
+
+      const targetDate = createMockElement('button', {
+        'data-date': '2026-10-18',
+        'aria-selected': 'false',
+      });
+      const slot = createMockElement('button', { innerText: '18:00' });
+
+      targetDate.addEventListener('click', () => {
+        setTimeout(() => {
+          targetDate.setAttribute('aria-selected', 'true');
+          targetDate.disabled = true;
+          selectedDate = '2026-10-18';
+        }, 0);
+      });
+      slot.addEventListener('click', () => {
+        claimedForDate = selectedDate;
+      });
+
+      const doc = createMockDocument([targetDate, slot]);
+      const adapter = createInlineDomAdapter({ document: doc, logger: () => {} });
+      adapter.submitReservation = async () => ({ success: true, status: 'CONFIRMED' });
+
+      const engine = createSnipingEngine({
+        adapter,
+        getConfig: () => ({
+          targetDate: '2026-10-18',
+          adults: '4',
+          kids: '0',
+          prioritySlots: '18:00',
+        }),
+        logger: () => {},
+        onStatusUpdate: () => {},
+        onNotify: () => {},
+      });
+
+      engine.triggerDropAction();
+      await new Promise((resolve) => setTimeout(resolve, 180));
+      engine.stop();
+
+      assert.equal(claimedForDate, '2026-10-18');
+    });
+
+    it('opens the collapsed inline date picker and confirms its target-date summary before claiming a Time Slot', async () => {
+      let selectedDate = '2026-09-01';
+      let claimedForDate = null;
+
+      const datePicker = createMockElement('div', {
+        id: 'date-picker',
+        'data-cy': 'date-picker',
+        'aria-expanded': 'false',
+        innerText: '9月1日週二 (今日)',
+      });
+      const selectedDateSummary = createMockElement('button', {
+        'data-cy': 'target-date',
+        innerText: '2026年9月1日',
+      });
+      const targetDay = createMockElement('div', {
+        'data-cy': 'bt-cal-day',
+        'data-date': '2026-09-18',
+        hidden: true,
+        innerText: '18',
+      });
+      const slot = createMockElement('button', { innerText: '18:00' });
+
+      datePicker.addEventListener('click', () => {
+        datePicker.setAttribute('aria-expanded', 'true');
+        targetDay.offsetParent = {};
+      });
+      targetDay.addEventListener('click', () => {
+        setTimeout(() => {
+          selectedDateSummary.innerText = '2026年9月18日';
+          selectedDate = '2026-09-18';
+          datePicker.setAttribute('aria-expanded', 'false');
+          targetDay.offsetParent = null;
+        }, 0);
+      });
+      slot.addEventListener('click', () => {
+        claimedForDate = selectedDate;
+      });
+
+      const doc = createMockDocument([datePicker, selectedDateSummary, targetDay, slot]);
+      const adapter = createInlineDomAdapter({ document: doc, logger: () => {} });
+      adapter.selectTableType = () => null;
+      adapter.submitReservation = async () => ({ success: true, status: 'CONFIRMED' });
+
+      const engine = createSnipingEngine({
+        adapter,
+        getConfig: () => ({
+          targetDate: '2026-09-18',
+          adults: '4',
+          kids: '0',
+          prioritySlots: '18:00',
+        }),
+        logger: () => {},
+        onStatusUpdate: () => {},
+        onNotify: () => {},
+      });
+
+      engine.triggerDropAction();
+      await new Promise((resolve) => setTimeout(resolve, 320));
+      engine.stop();
+
+      assert.equal(claimedForDate, '2026-09-18');
     });
   });
 

@@ -42,7 +42,7 @@ describe('Autonomous Submission Pipeline & Deposit Policy Guard (Issue #5)', () 
     assert.ok(notifications[0].body.includes('信用卡預授權'));
   });
 
-  it('autonomously submits reservation when free and autoSubmitFree is true', async () => {
+  it('autonomously submits a free reservation', async () => {
     const adapter = createFakeReservationAdapter({
       isContactFormPage: true,
       requiresDeposit: false,
@@ -61,7 +61,6 @@ describe('Autonomous Submission Pipeline & Deposit Policy Guard (Issue #5)', () 
         userPhone: '0988776655',
         userEmail: 'lee@example.com',
         bookingNote: '慶祝生日',
-        autoSubmitFree: true,
       }),
       logger: (msg) => logs.push(msg),
       onNotify: (title, body) => notifications.push({ title, body }),
@@ -83,7 +82,7 @@ describe('Autonomous Submission Pipeline & Deposit Policy Guard (Issue #5)', () 
     assert.equal(submitted.guestDetails.phone, '0988776655');
   });
 
-  it('holds submission for manual confirmation when autoSubmitFree is false', async () => {
+  it('autonomously submits a free reservation even when legacy saved settings disable autoSubmitFree', async () => {
     const adapter = createFakeReservationAdapter({
       isContactFormPage: true,
       requiresDeposit: false,
@@ -108,8 +107,8 @@ describe('Autonomous Submission Pipeline & Deposit Policy Guard (Issue #5)', () 
 
     assert.equal(engine.getStatus(), SnipingState.COMPLETED);
     assert.equal(notifications.length, 1);
-    assert.equal(notifications[0].title, 'Inline 搶位成功');
-    assert.ok(notifications[0].body.includes('請點擊頁面送出'));
-    assert.equal(adapter._getState().submittedReservation, null);
+    assert.equal(notifications[0].title, 'Inline 訂位完成');
+    assert.ok(notifications[0].body.includes('完成預約'));
+    assert.ok(adapter._getState().submittedReservation);
   });
 });
