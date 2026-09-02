@@ -20,7 +20,7 @@ describe('Integration & Single-File Userscript Verification (Issue #6)', () => {
   it('publishes updateable Tampermonkey metadata and identical distributed scripts', () => {
     const rawUserscriptUrl = 'https://raw.githubusercontent.com/huijoson/inline-agent/main/inline-reservation-bot.user.js';
 
-    assert.ok(fileContent.includes('// @version      2.2.0'));
+    assert.ok(fileContent.includes('// @version      2.2.1'));
     assert.ok(fileContent.includes(`// @updateURL    ${rawUserscriptUrl}`));
     assert.ok(fileContent.includes(`// @downloadURL  ${rawUserscriptUrl}`));
     assert.equal(fileContent, mirrorContent);

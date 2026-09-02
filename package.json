@@ -1,6 +1,6 @@
 {
   "name": "inline-booking-sniper",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "High-performance automated reservation sniper for inline.app",
   "main": "inline-reservation-bot.user.js",
   "scripts": {

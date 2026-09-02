@@ -49,7 +49,7 @@ graph TD
 ### 步驟 2.2：安裝 InlineSniper userscript
 
 1. 開啟 [`inline-reservation-bot.user.js`](https://raw.githubusercontent.com/huijoson/inline-agent/main/inline-reservation-bot.user.js)。
-2. 在 Tampermonkey 安裝畫面確認版本為 `2.2.0`，按下「安裝」。
+2. 在 Tampermonkey 安裝畫面確認版本為 `2.2.1`，按下「安裝」。
 3. 開啟餐廳專屬訂位頁面（網址需包含 `inline.app/booking/`），右下角會出現「⚡ Inline 搶位助手」。
 
 ### 步驟 2.3：驗證可恢復式撿漏

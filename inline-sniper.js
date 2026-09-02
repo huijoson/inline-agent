@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Inline 餐廳自動搶位助手 (Inline Booking Sniper)
 // @namespace    https://github.com/inline-agent
-// @version      2.2.0
+// @version      2.2.1
 // @description  支援準時放位與 Tampermonkey 可恢復式釋出撿漏，自動校時、重新整理查詢、秒選時段、填表與送出。
 // @author       Antigravity
 // @homepageURL  https://github.com/huijoson/inline-agent
@@ -23,10 +23,15 @@
   // ==========================================
   const STORAGE_KEY = 'INLINE_SNIPER_CONFIG_V1';
   const RUNTIME_STORAGE_KEY = 'INLINE_SNIPER_RUNTIME_V1';
+  const CancellationPhase = Object.freeze({
+    MONITORING: 'monitoring',
+    SUBMITTING: 'submitting',
+  });
   const INACTIVE_RUNTIME_STATE = Object.freeze({
     active: false,
     mode: null,
     bookingTarget: '',
+    phase: null,
   });
 
   function createRuntimeStateStore(storage, key = RUNTIME_STORAGE_KEY) {
@@ -45,6 +50,9 @@
           active: true,
           mode: 'cancellation',
           bookingTarget: String(parsed.bookingTarget),
+          phase: parsed.phase === CancellationPhase.SUBMITTING
+            ? CancellationPhase.SUBMITTING
+            : CancellationPhase.MONITORING,
         };
       } catch (e) {
         return { ...INACTIVE_RUNTIME_STATE };
@@ -53,13 +61,16 @@
 
     return {
       load,
-      activate(bookingTarget) {
+      activate(bookingTarget, phase = CancellationPhase.MONITORING) {
         if (!storage || !bookingTarget) return false;
         try {
           storage.setItem(key, JSON.stringify({
             active: true,
             mode: 'cancellation',
             bookingTarget: String(bookingTarget),
+            phase: phase === CancellationPhase.SUBMITTING
+              ? CancellationPhase.SUBMITTING
+              : CancellationPhase.MONITORING,
           }));
           return true;
         } catch (e) {
@@ -98,7 +109,8 @@
       return false;
     }
 
-    if (start() === false) return false;
+    const persisted = store.load();
+    if (start({ phase: persisted.phase }) === false) return false;
     logger('♻️ Tampermonkey 已自動恢復釋出撿漏');
     return true;
   }
@@ -1369,6 +1381,13 @@
 
     function submitCurrentReservation() {
       const cfg = configProvider();
+      if (currentMode === 'cancellation') {
+        onRunStateChange({
+          active: true,
+          mode: currentMode,
+          phase: CancellationPhase.SUBMITTING,
+        });
+      }
       setStatus(SnipingState.ACTIVE_SNIPING, '🟢 鎖定時段，提交中...', '--:--:--', true);
       adapter.submitReservation({
         name: cfg.userName,
@@ -1567,12 +1586,22 @@
       }
     }
 
-    function start() {
+    function start(resumeState = null) {
       clearAllTimers();
       const cfg = configProvider();
       currentMode = cfg.mode;
+      const resumedPhase = currentMode === 'cancellation' && (
+        resumeState?.phase === CancellationPhase.MONITORING ||
+        resumeState?.phase === CancellationPhase.SUBMITTING
+      )
+        ? resumeState.phase
+        : null;
 
-      const runStateChanged = onRunStateChange({ active: true, mode: currentMode });
+      const runStateChanged = onRunStateChange({
+        active: true,
+        mode: currentMode,
+        ...(resumedPhase ? { phase: resumedPhase } : {}),
+      });
       if (currentMode === 'cancellation' && runStateChanged === false) {
         state.isRunning = false;
         setStatus(SnipingState.IDLE, '🔴 無法啟動', '--:--:--', false);
@@ -1583,6 +1612,17 @@
       state.isRunning = true;
       setStatus(SnipingState.ACTIVE_SNIPING, '🟢 運行中', '--:--:--', true);
       logger(`🚀 搶位程序啟動 [模式: ${cfg.mode === 'drop' ? '準時放位' : '釋出撿漏'}]`);
+
+      if (resumedPhase === CancellationPhase.SUBMITTING) {
+        logger('📋 已恢復鎖定時段後的自動填表與送出程序');
+        submitCurrentReservation();
+        return true;
+      }
+
+      if (resumedPhase === CancellationPhase.MONITORING) {
+        executeCancellationCycle();
+        return true;
+      }
 
       // 若目前畫面已就緒聯絡資訊表單，直接進入送出程序
       if (adapter.isContactFormPage && adapter.isContactFormPage()) {
@@ -1615,7 +1655,7 @@
   const SnipingEngine = createSnipingEngine({
     onRunStateChange(event) {
       if (event.active && event.mode === 'cancellation') {
-        return runtimeStateStore.activate(getCurrentBookingTarget());
+        return runtimeStateStore.activate(getCurrentBookingTarget(), event.phase);
       } else {
         return runtimeStateStore.deactivate();
       }
@@ -1643,7 +1683,7 @@
       store: runtimeStateStore,
       bookingTarget: getCurrentBookingTarget(),
       mode: config.mode,
-      start: () => SnipingEngine.start(),
+      start: (resumeState) => SnipingEngine.start(resumeState),
       logger: addLog,
     });
   }

@@ -34,6 +34,34 @@ describe('Tampermonkey cancellation runtime state', () => {
     assert.equal(store.deactivate(), true);
   });
 
+  it('persists whether Cancellation Sniping is monitoring or submitting', () => {
+    const store = createRuntimeStateStore(createMemoryStorage());
+    const bookingTarget = 'https://inline.app/booking/shop-a';
+
+    store.activate(bookingTarget, 'submitting');
+
+    assert.deepEqual(store.load(), {
+      active: true,
+      mode: 'cancellation',
+      bookingTarget,
+      phase: 'submitting',
+    });
+  });
+
+  it('treats active runtime state from version 2.2.0 as monitoring', () => {
+    const bookingTarget = 'https://inline.app/booking/shop-a';
+    const storage = createMemoryStorage({
+      INLINE_SNIPER_RUNTIME_V1: JSON.stringify({
+        active: true,
+        mode: 'cancellation',
+        bookingTarget,
+      }),
+    });
+    const store = createRuntimeStateStore(storage);
+
+    assert.equal(store.load().phase, 'monitoring');
+  });
+
   it('returns false instead of throwing when activation storage fails', () => {
     const store = createRuntimeStateStore({
       getItem: () => null,
@@ -114,6 +142,7 @@ describe('Tampermonkey cancellation runtime state', () => {
       active: false,
       mode: null,
       bookingTarget: '',
+      phase: null,
     });
   });
 
@@ -135,6 +164,129 @@ describe('Tampermonkey cancellation runtime state', () => {
 
     assert.equal(resumed, true);
     assert.equal(startCount, 1);
+  });
+
+  it('resumes monitoring after polling reload without treating a contact form as a claimed Time Slot', async (t) => {
+    const store = createRuntimeStateStore(createMemoryStorage());
+    const bookingTarget = 'https://inline.app/booking/shop-a';
+    const adapter = createFakeReservationAdapter({
+      isContactFormPage: true,
+      availableDates: ['2026-11-01'],
+      availableSlots: [],
+    });
+    store.activate(bookingTarget, 'monitoring');
+
+    const engine = createSnipingEngine({
+      adapter,
+      getConfig: () => ({
+        mode: 'cancellation',
+        targetDate: '2026-11-01',
+        adults: '2',
+        kids: '0',
+        prioritySlots: '18:00',
+        pollIntervalMin: 5,
+        pollIntervalMax: 5,
+      }),
+      onRunStateChange: ({ active, phase }) => active
+        ? store.activate(bookingTarget, phase)
+        : store.deactivate(),
+      onStatusUpdate: () => {},
+      onNotify: () => {},
+      logger: () => {},
+    });
+    t.after(() => engine.stop());
+
+    const resumed = resumePersistedCancellation({
+      store,
+      bookingTarget,
+      mode: 'cancellation',
+      start: (resumeState) => engine.start(resumeState),
+      logger: () => {},
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(resumed, true);
+    assert.equal(adapter._getState().reloadCount, 1);
+    assert.equal(adapter._getState().submittedReservation, null);
+    assert.equal(store.shouldResume(bookingTarget), true);
+  });
+
+  it('resumes submission after a claimed Time Slot even before the contact form finishes rendering', async (t) => {
+    const store = createRuntimeStateStore(createMemoryStorage());
+    const bookingTarget = 'https://inline.app/booking/shop-a';
+    const adapter = createFakeReservationAdapter({
+      isContactFormPage: false,
+      availableDates: ['2026-11-01'],
+      availableSlots: [],
+    });
+    store.activate(bookingTarget, 'submitting');
+
+    const engine = createSnipingEngine({
+      adapter,
+      getConfig: () => ({
+        mode: 'cancellation',
+        targetDate: '2026-11-01',
+        adults: '2',
+        kids: '0',
+        prioritySlots: '18:00',
+        pollIntervalMin: 5,
+        pollIntervalMax: 5,
+      }),
+      onRunStateChange: ({ active, phase }) => active
+        ? store.activate(bookingTarget, phase)
+        : store.deactivate(),
+      onStatusUpdate: () => {},
+      onNotify: () => {},
+      logger: () => {},
+    });
+    t.after(() => engine.stop());
+
+    const resumed = resumePersistedCancellation({
+      store,
+      bookingTarget,
+      mode: 'cancellation',
+      start: (resumeState) => engine.start(resumeState),
+      logger: () => {},
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(resumed, true);
+    assert.ok(adapter._getState().submittedReservation);
+    assert.equal(adapter._getState().reloadCount, 0);
+  });
+
+  it('persists the submitting phase as soon as Cancellation Sniping claims a Time Slot', async (t) => {
+    const store = createRuntimeStateStore(createMemoryStorage());
+    const bookingTarget = 'https://inline.app/booking/shop-a';
+    const adapter = createFakeReservationAdapter({
+      availableDates: ['2026-11-01'],
+      availableSlots: ['18:00'],
+      submissionDelayMs: 50,
+    });
+    const engine = createSnipingEngine({
+      adapter,
+      getConfig: () => ({
+        mode: 'cancellation',
+        targetDate: '2026-11-01',
+        adults: '2',
+        kids: '0',
+        prioritySlots: '18:00',
+        pollIntervalMin: 5,
+        pollIntervalMax: 5,
+      }),
+      onRunStateChange: ({ active, phase }) => active
+        ? store.activate(bookingTarget, phase)
+        : store.deactivate(),
+      onStatusUpdate: () => {},
+      onNotify: () => {},
+      logger: () => {},
+    });
+    t.after(() => engine.stop());
+
+    engine.start();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    assert.equal(store.load().phase, 'submitting');
   });
 
   it('reports resume failure when delegated Cancellation startup fails', () => {

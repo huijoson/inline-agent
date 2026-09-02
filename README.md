@@ -39,7 +39,7 @@
 
 1. 從 [Tampermonkey 官方網站](https://www.tampermonkey.net/) 安裝符合瀏覽器的擴充功能。
 2. 開啟 [`inline-reservation-bot.user.js`](https://raw.githubusercontent.com/huijoson/inline-agent/main/inline-reservation-bot.user.js)；Tampermonkey 應顯示 userscript 安裝畫面。
-3. 確認腳本版本為 `2.2.0`，按下「安裝」。
+3. 確認腳本版本為 `2.2.1`，按下「安裝」。
 4. 之後開啟符合 `https://inline.app/*` 的頁面，腳本會自動載入。新版包含 `@updateURL` 與 `@downloadURL`，後續可由 Tampermonkey 檢查更新。
 
 ### 步驟二：開啟目標餐廳訂位頁面
@@ -108,7 +108,7 @@ node --test
 
 ## 📚 專案架構與設計決策 (ADR)
 
-- 📘 **[完整使用者操作手冊 (USER_GUIDE.md)](./USER_GUIDE.md)**：包含 v2.2.0 Tampermonkey userscript 安裝、參數設定、實戰人機協同與對抗 PerimeterX 按壓防護的完整教學指南。
+- 📘 **[完整使用者操作手冊 (USER_GUIDE.md)](./USER_GUIDE.md)**：包含 v2.2.1 Tampermonkey userscript 安裝、參數設定、實戰人機協同與對抗 PerimeterX 按壓防護的完整教學指南。
 - 📖 **[領域模型規範 (CONTEXT.md)](./CONTEXT.md)**：定義本系統之領域術語（Reservation, Priority Slot List, Table Category, Deposit Policy 等）。
 - 🏛️ **[ADR 0001: Adopt Tampermonkey Userscript Architecture](./docs/adr/0001-userscript-architecture.md)**：說明採用本機油猴腳本而非外部 CDP 腳本以規避 PerimeterX 的架構決策。
 - 🏛️ **[ADR 0002: Soft Re-triggering Over Full Page Reload](./docs/adr/0002-soft-retrigger-over-full-reload.md)**：說明開搶時採用毫秒級軟刷新機制以將延遲降至最低的考量。
